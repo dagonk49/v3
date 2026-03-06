@@ -1,12 +1,53 @@
 import { NextResponse } from 'next/server';
 import { MongoClient } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 
+// ═══ SÉCURITÉ : Origine CORS autorisée (APP_ORIGIN en production) ═══
+const ALLOWED_ORIGIN = process.env.APP_ORIGIN || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000');
+
+// ═══ MongoDB Connection Pool (pattern officiel Next.js / Serverless) ═══
 const MONGO_URL = process.env.MONGO_URL;
 const DB_NAME = process.env.DB_NAME || 'dagzflix';
 
-let cachedClient = null;
-let cachedDb = null;
+/** @type {Promise<import('mongodb').MongoClient>|undefined} */
+let clientPromise;
+
+if (MONGO_URL) {
+  if (process.env.NODE_ENV === 'development') {
+    // En dev : réutilise le client cross-HMR via global._mongoClientPromise
+    if (!global._mongoClientPromise) {
+      const client = new MongoClient(MONGO_URL, { maxPoolSize: 10 });
+      global._mongoClientPromise = client.connect();
+    }
+    clientPromise = global._mongoClientPromise;
+  } else {
+    // En production : une seule instance par processus (pool partagé)
+    const client = new MongoClient(MONGO_URL, { maxPoolSize: 10 });
+    clientPromise = client.connect();
+  }
+}
+
+// ═══ Schémas Zod — prévention injection NoSQL ═══
+const alphanumericId = z.string().regex(/^[a-zA-Z0-9_.-]+$/, 'ID invalide (caractères alphanumériques, _, -, . uniquement)').max(128);
+
+const FavoriteToggleSchema = z.object({
+  itemId: alphanumericId,
+  itemData: z.record(z.unknown()).optional(),
+});
+
+const WizardFeedbackSchema = z.object({
+  action: z.string().max(20),
+  itemId: alphanumericId.optional(),
+  tmdbId: alphanumericId.optional(),
+  genres: z.array(z.string().max(50)).max(10).optional(),
+});
+
+const MediaRateSchema = z.object({
+  itemId: alphanumericId,
+  value: z.union([z.number().int().min(1).max(5), z.string().regex(/^[1-5]$/)]),
+  genres: z.array(z.string().max(50)).max(10).optional(),
+});
 
 const TMDB_GENRE_ID_TO_NAME = {
   12: 'Adventure',
@@ -39,39 +80,74 @@ const TMDB_GENRE_ID_TO_NAME = {
 };
 
 /**
- * Retourne une instance MongoDB mise en cache (singleton).
- * Crée la connexion à la première invocation, réutilise ensuite.
+ * Retourne une instance de la base MongoDB via le pool de connexions.
+ * Utilise le pattern global._mongoClientPromise pour réutiliser le client
+ * entre les requêtes en mode développement (HMR) et production.
  * @returns {Promise<import('mongodb').Db>} Instance de la base de données
  * @throws {Error} Si MONGO_URL n'est pas défini dans les variables d'environnement
  */
 async function getDb() {
-  if (cachedDb) return cachedDb;
-  if (!MONGO_URL) {
-    throw new Error('MONGO_URL manquante');
+  if (!MONGO_URL || !clientPromise) {
+    throw new Error('MONGO_URL manquante dans les variables d\'environnement');
   }
-  if (!cachedClient) {
-    cachedClient = new MongoClient(MONGO_URL);
-    await cachedClient.connect();
-  }
-  cachedDb = cachedClient.db(DB_NAME);
-  return cachedDb;
+  const client = await clientPromise;
+  return client.db(DB_NAME);
 }
 
 /**
- * Crée une NextResponse JSON avec les headers CORS pré-configurés.
+ * Garde RBAC centralisé : vérifie que la session existe ET que l'utilisateur
+ * possède le rôle admin en interrogeant la base de données.
+ * @param {Request} req - Requête entrante (avec cookies)
+ * @returns {Promise<{session?: Object, profile?: Object, error?: NextResponse}>}
+ *   - Si autorisé : {session, profile}
+ *   - Si refusé : {error: NextResponse} à retourner immédiatement
+ */
+async function requireAdmin(req) {
+  const session = await getSession(req);
+  if (!session) {
+    return { error: jsonResponse({ error: 'Non authentifié' }, 401) };
+  }
+  const db = await getDb();
+  const profile = await db.collection('users').findOne({ userId: session.userId });
+  if (!profile || profile.role !== 'admin') {
+    return { error: jsonResponse({ error: 'Accès réservé aux administrateurs' }, 403) };
+  }
+  return { session, profile };
+}
+
+/**
+ * Valide l'origine d'une requête pour les headers CORS.
+ * En production : n'autorise que APP_ORIGIN (variable d'environnement).
+ * En développement : autorise localhost si APP_ORIGIN n'est pas défini.
+ * @param {string|null} requestOrigin - Header Origin de la requête
+ * @returns {string} Origine validée ou chaîne vide (bloque les requêtes cross-origin)
+ */
+function validateOrigin(requestOrigin) {
+  if (ALLOWED_ORIGIN && requestOrigin === ALLOWED_ORIGIN) return ALLOWED_ORIGIN;
+  if (!ALLOWED_ORIGIN && requestOrigin) {
+    if (requestOrigin.startsWith('http://localhost:') || requestOrigin.startsWith('http://127.0.0.1:')) {
+      return requestOrigin;
+    }
+  }
+  return ALLOWED_ORIGIN || '';
+}
+
+/**
+ * Crée une NextResponse JSON avec les headers CORS sécurisés.
+ * L'origine autorisée est contrôlée par la variable APP_ORIGIN.
  * @param {Object} data  - Corps de la réponse JSON
  * @param {number} [status=200] - Code HTTP
  * @returns {NextResponse} Réponse prête à être retournée par le handler
  */
 function jsonResponse(data, status = 200) {
-  return NextResponse.json(data, {
-    status,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+  if (ALLOWED_ORIGIN) {
+    headers['Access-Control-Allow-Origin'] = ALLOWED_ORIGIN;
+  }
+  return NextResponse.json(data, { status, headers });
 }
 
 /**
@@ -105,53 +181,74 @@ const jellyfinTokenValidationCache = new Map();
 const TOKEN_VALIDATION_TTL = 5 * 60 * 1000; // 5 minutes
 
 async function getSession(req) {
-  const sessionId = req.cookies.get('dagzflix_session')?.value;
-  if (!sessionId) return null;
-  const db = await getDb();
-  const session = await db.collection('sessions').findOne({ _id: sessionId });
-  if (!session) return null;
-  if (new Date(session.expiresAt) < new Date()) {
-    await db.collection('sessions').deleteOne({ _id: sessionId });
-    return null;
-  }
+  try {
+    const sessionId = req.cookies.get('dagzflix_session')?.value;
+    if (!sessionId) return null;
 
-  // V7.8: Valider le token Jellyfin (cache 5 min pour éviter le spam)
-  const cacheKey = `${session.jellyfinUserId}_${session.jellyfinToken}`;
-  const cached = jellyfinTokenValidationCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < TOKEN_VALIDATION_TTL) {
-    if (!cached.valid) {
-      // Token invalidé lors d'une vérification récente → purger la session
-      await db.collection('sessions').deleteOne({ _id: sessionId });
+    let db;
+    try {
+      db = await getDb();
+    } catch (dbErr) {
+      console.error('[getSession] MongoDB indisponible — session impossible:', dbErr.message);
       return null;
     }
-    return session;
-  }
 
-  // Vérification réelle contre Jellyfin
-  try {
-    const config = await getConfig();
-    if (config?.jellyfinUrl && session.jellyfinToken) {
-      const checkRes = await fetch(
-        `${config.jellyfinUrl}/Users/${session.jellyfinUserId}`,
-        {
-          headers: { 'X-Emby-Token': session.jellyfinToken },
-          signal: AbortSignal.timeout(10000),
-        }
-      );
-      if (checkRes.status === 401) {
-        console.warn(`[getSession] Token Jellyfin expiré pour ${session.username} — session invalidée`);
-        jellyfinTokenValidationCache.set(cacheKey, { valid: false, ts: Date.now() });
-        await db.collection('sessions').deleteOne({ _id: sessionId });
+    let session;
+    try {
+      session = await db.collection('sessions').findOne({ _id: sessionId });
+    } catch (findErr) {
+      console.error('[getSession] findOne failed:', findErr.message);
+      return null;
+    }
+    if (!session) return null;
+
+    if (new Date(session.expiresAt) < new Date()) {
+      try { await db.collection('sessions').deleteOne({ _id: sessionId }); } catch (_) { /* non-blocking */ }
+      return null;
+    }
+
+    // V7.8: Valider le token Jellyfin (cache 5 min pour éviter le spam)
+    const cacheKey = `${session.jellyfinUserId}_${session.jellyfinToken}`;
+    const cached = jellyfinTokenValidationCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < TOKEN_VALIDATION_TTL) {
+      if (!cached.valid) {
+        // Token invalidé lors d'une vérification récente → purger la session
+        try { await db.collection('sessions').deleteOne({ _id: sessionId }); } catch (_) { /* non-blocking */ }
         return null;
       }
-      jellyfinTokenValidationCache.set(cacheKey, { valid: true, ts: Date.now() });
+      return session;
     }
-  } catch (err) {
-    // Réseau down → on laisse passer (on ne veut pas bloquer si Jellyfin est temporairement indisponible)
-    console.warn('[getSession] Token validation failed (network):', err.message);
-  }
 
-  return session;
+    // Vérification réelle contre Jellyfin
+    try {
+      const config = await getConfig();
+      if (config?.jellyfinUrl && session.jellyfinToken) {
+        const checkRes = await fetch(
+          `${config.jellyfinUrl}/Users/${session.jellyfinUserId}`,
+          {
+            headers: { 'X-Emby-Token': session.jellyfinToken },
+            signal: AbortSignal.timeout(10000),
+          }
+        );
+        if (checkRes.status === 401) {
+          console.warn(`[getSession] Token Jellyfin expiré pour ${session.username} — session invalidée`);
+          jellyfinTokenValidationCache.set(cacheKey, { valid: false, ts: Date.now() });
+          try { await db.collection('sessions').deleteOne({ _id: sessionId }); } catch (_) { /* non-blocking */ }
+          return null;
+        }
+        jellyfinTokenValidationCache.set(cacheKey, { valid: true, ts: Date.now() });
+      }
+    } catch (err) {
+      // Réseau down → on laisse passer (on ne veut pas bloquer si Jellyfin est temporairement indisponible)
+      console.warn('[getSession] Token validation failed (network):', err.message);
+    }
+
+    return session;
+  } catch (fatalErr) {
+    // Dernière barrière : ne JAMAIS crasher le route handler à cause de getSession
+    console.error('[getSession] FATAL — retour null par sécurité:', fatalErr.message);
+    return null;
+  }
 }
 
 /**
@@ -321,16 +418,27 @@ function contentIdFromItem(item) {
  * @param {Object} session - Session active (jellyfinUserId, jellyfinToken)
  * @returns {Promise<Map<string, string>>} Map(tmdbId → jellyfinId) des items locaux
  */
+// ═══ Cache en mémoire pour getLocalTmdbIds (V0.008.1 Mission 2) ═══
+// Évite de demander Limit=10000 à Jellyfin sur chaque requête discover/search
+let _localTmdbIdsCache = null;
+let _localTmdbIdsCacheTime = 0;
+const LOCAL_TMDB_IDS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function getLocalTmdbIds(config, session) {
   try {
-    // V7.7: Limit=10000 pour scanner TOUTE la bibliothèque (Jellyfin default = ~100)
+    // V0.008.1 : Retourner le cache si frais (< 5 min)
+    if (_localTmdbIdsCache && (Date.now() - _localTmdbIdsCacheTime < LOCAL_TMDB_IDS_CACHE_TTL)) {
+      return _localTmdbIdsCache;
+    }
+
     const res = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Fields=ProviderIds&Limit=10000`, {
       headers: { 'X-Emby-Token': session.jellyfinToken },
       signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) {
       console.error('[getLocalTmdbIds] Jellyfin responded with', res.status);
-      return new Map();
+      // Si on a un ancien cache, le réutiliser plutôt que de retourner vide
+      return _localTmdbIdsCache || new Map();
     }
     const data = await res.json();
     const map = new Map();
@@ -338,11 +446,17 @@ async function getLocalTmdbIds(config, session) {
       const tmdbId = extractTmdbId(i.ProviderIds || {});
       if (tmdbId) map.set(String(tmdbId), i.Id);
     }
-    console.log(`[getLocalTmdbIds] Mapped ${map.size} local items (scanned ${(data.Items || []).length})`);
+    console.log(`[getLocalTmdbIds] Mapped ${map.size} local items (scanned ${(data.Items || []).length}) — cached for 5 min`);
+
+    // Peupler le cache
+    _localTmdbIdsCache = map;
+    _localTmdbIdsCacheTime = Date.now();
+
     return map;
   } catch (err) {
     console.error('[getLocalTmdbIds] failed:', err.message);
-    return new Map();
+    // Fallback : retourner l'ancien cache s'il existe, sinon Map vide
+    return _localTmdbIdsCache || new Map();
   }
 }
 
@@ -442,15 +556,32 @@ function calculateDagzRank(item, preferences, watchHistory, telemetryData = null
   const rating = item.communityRating || item.CommunityRating || item.voteAverage || 0;
   score += (rating / 10) * 15;
 
-  // ── 4) Freshness / year bonus (max 10 pts) ──
+  // ── 4) Freshness / year bonus (max 10 pts) — V0.009 : pondéré par genre ──
   const year = item.year || item.ProductionYear || 0;
   const currentYear = new Date().getFullYear();
   if (year) {
     const age = currentYear - parseInt(year, 10);
-    if (age <= 1) score += 10;
-    else if (age <= 3) score += 7;
-    else if (age <= 5) score += 4;
-    else if (age <= 10) score += 2;
+    // V0.009 : Les genres « intemporels » (Documentaire, Classique, History, Western…)
+    // ne sont PAS pénalisés par l'âge — l'ancienneté est même un atout.
+    const timelessGenres = ['documentary', 'documentaire', 'history', 'histoire', 'classic', 'classique', 'war', 'guerre', 'western'];
+    const itemGenresLower = itemGenres.map(g => g.toLowerCase());
+    const isTimeless = itemGenresLower.some(g => timelessGenres.includes(g));
+    const favGenresLower = (preferences?.favoriteGenres || []).map(g => g.toLowerCase());
+    const userLikesTimeless = favGenresLower.some(g => timelessGenres.includes(g));
+
+    if (isTimeless && (userLikesTimeless || age > 10)) {
+      // Genre intemporel + utilisateur fan ou film ancien : score stable
+      score += 7;
+    } else if (isTimeless) {
+      // Genre intemporel, utilisateur neutre : léger bonus décroissant
+      score += Math.max(4, 10 - Math.floor(age / 5));
+    } else {
+      // Scoring classique pour les genres standard
+      if (age <= 1) score += 10;
+      else if (age <= 3) score += 7;
+      else if (age <= 5) score += 4;
+      else if (age <= 10) score += 2;
+    }
   }
 
   // ── 5) Personal telemetry bonus (max 10 pts, 5 pts neutral si pas de data) ──
@@ -785,8 +916,8 @@ async function handleAuthLogin(req) {
 
   response.cookies.set('dagzflix_session', sessionId, {
     httpOnly: true,
-    secure: false,
-    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
     maxAge: 7 * 24 * 60 * 60,
     path: '/',
   });
@@ -811,7 +942,13 @@ async function handleAuthLogout(req) {
     await db.collection('sessions').deleteOne({ _id: sessionId });
   }
   const response = jsonResponse({ success: true });
-  response.cookies.set('dagzflix_session', '', { maxAge: 0, path: '/' });
+  response.cookies.set('dagzflix_session', '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 0,
+    path: '/',
+  });
   return response;
 }
 
@@ -1386,10 +1523,10 @@ async function handleMediaDetail(req) {
 
   const genres = resolveGenres(tmdbData);
 
-  // V7.5 Mission 5: strict local cross-reference with localId
+  // V7.5 Mission 5 + V0.008.1 Mission 4: strict local cross-reference with safe undefined guard
   const tmdbStr = String(tmdbData.id);
-  const isLocallyAvailable = localTmdbIds.has(tmdbStr);
-  const localJellyfinId = isLocallyAvailable ? localTmdbIds.get(tmdbStr) : undefined;
+  const isLocallyAvailable = localTmdbIds && localTmdbIds.has(tmdbStr);
+  const localJellyfinId = isLocallyAvailable ? (localTmdbIds.get(tmdbStr) || undefined) : undefined;
 
   // V7.5 Mission 3: inject favorite status
   const db = await getDb();
@@ -1535,8 +1672,11 @@ async function handleMediaFavoriteToggle(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
 
-  const { itemId, itemData } = await req.json();
-  if (!itemId) return jsonResponse({ error: 'ID requis' }, 400);
+  let rawBody;
+  try { rawBody = await req.json(); } catch (_) { return jsonResponse({ error: 'Body JSON invalide' }, 400); }
+  const parsed = FavoriteToggleSchema.safeParse(rawBody);
+  if (!parsed.success) return jsonResponse({ error: 'Données invalides', details: parsed.error.flatten() }, 400);
+  const { itemId, itemData } = parsed.data;
 
   const db = await getDb();
   const filter = { userId: session.userId, itemId: String(itemId) };
@@ -2095,13 +2235,19 @@ async function handleStream(req) {
   // V7.6: If the ID looks like a TMDB numeric ID (not a Jellyfin UUID),
   // try to resolve it to a local Jellyfin ID first
   const isLikelyTmdbId = /^\d+$/.test(itemId);
+  // V0.008.1 Mission 4: Protection des ID numériques — gestion gracieuse du undefined
   if (isLikelyTmdbId) {
-    const localTmdbIds = await getLocalTmdbIds(config, session);
-    const resolvedId = localTmdbIds.get(String(itemId));
-    if (resolvedId) {
-      itemId = resolvedId;
-    } else {
-      return jsonResponse({ error: 'Media non disponible localement — demandez-le via Jellyseerr', notLocal: true }, 404);
+    try {
+      const localTmdbIds = await getLocalTmdbIds(config, session);
+      const resolvedId = localTmdbIds ? localTmdbIds.get(String(itemId)) : undefined;
+      if (resolvedId) {
+        itemId = resolvedId;
+      } else {
+        return jsonResponse({ error: 'Media non disponible localement — demandez-le via Jellyseerr', notLocal: true }, 404);
+      }
+    } catch (resolveErr) {
+      console.error('[handleStream] localTmdbIds lookup failed:', resolveErr.message);
+      return jsonResponse({ error: 'Impossible de résoudre l\'ID local, réessayez', notLocal: true }, 503);
     }
   }
 
@@ -2328,12 +2474,11 @@ async function handleDiscover(req) {
     const studio = url.searchParams.get('studio') || '';
     const endpoint = type === 'tv' ? 'tv' : 'movies';
 
-    // Request high quality trending content available in France (Netflix/Amazon)
+    // V0.008.1 : Résultats globaux sans restriction de plateforme
+    // (with_watch_providers retiré — pouvait bloquer les résultats si l'API TMDB répondait mal)
     const queryParams = new URLSearchParams({
       page: page,
       sortBy: 'popularity.desc',
-      watch_region: 'FR',
-      with_watch_providers: '8|119' // Netflix & Amazon Prime
     });
 
     // V7.5 Mission 4: genre filtering via TMDB genre ID
@@ -2364,23 +2509,29 @@ async function handleDiscover(req) {
     let allItems = (data.results || []).map(item => mapTmdbItem(item, type === 'tv'));
     const totalPages = data.totalPages || 1;
 
-    // Cross-référence locale (non-destructrice)
+    // Cross-référence locale (non-destructrice — V0.008.1 : ne vide JAMAIS allItems)
     try {
       const localTmdbIds = await getLocalTmdbIds(config, session);
-      allItems = allItems.map(mapped => {
-        if (mapped.tmdbId && localTmdbIds.has(String(mapped.tmdbId))) {
-          mapped.mediaStatus = 5;
-          mapped.localId = localTmdbIds.get(String(mapped.tmdbId));
-        }
-        return mapped;
-      });
+      if (localTmdbIds && localTmdbIds.size > 0) {
+        allItems = allItems.map(mapped => {
+          const tmdbStr = mapped.tmdbId ? String(mapped.tmdbId) : null;
+          if (tmdbStr && localTmdbIds.has(tmdbStr)) {
+            mapped.mediaStatus = 5;
+            mapped.localId = localTmdbIds.get(tmdbStr) || undefined;
+          }
+          return mapped;
+        });
+      }
     } catch (e) { console.error('[handleDiscover] localTmdbIds failed, skipping cross-ref:', e.message); }
 
-    // Filtre parental (non-destructeur)
+    // Filtre parental (non-destructeur — V0.008.1 : conserve allItems en cas d'erreur)
     try {
       const userProfile = await getUserProfile(session.userId).catch(() => null);
-      allItems = applyParentalFilter(allItems, userProfile);
-    } catch (e) { console.error('[handleDiscover] parental filter failed:', e.message); }
+      const filtered = applyParentalFilter(allItems, userProfile);
+      if (filtered && filtered.length > 0) {
+        allItems = filtered;
+      }
+    } catch (e) { console.error('[handleDiscover] parental filter failed, returning unfiltered:', e.message); }
 
     // Injection favoris (non-destructrice)
     try {
@@ -2628,15 +2779,16 @@ async function handleProxyImage(req) {
   });
 
   if (!res.ok) return new Response('Image not found', { status: 404 });
-  const buffer = await res.arrayBuffer();
+
+  // V0.009 : Streaming direct — pas de arrayBuffer() pour éviter les fuites mémoire
   const contentType = res.headers.get('content-type') || 'image/jpeg';
 
-  return new Response(buffer, {
+  return new Response(res.body, {
     status: 200,
     headers: {
       'Content-Type': contentType,
       'Cache-Control': 'public, max-age=86400',
-      'Access-Control-Allow-Origin': '*',
+      ...(ALLOWED_ORIGIN ? { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN } : {}),
     },
   });
 }
@@ -2652,7 +2804,11 @@ async function handleWizardFeedback(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
 
-  const { action, itemId, tmdbId, genres = [] } = await req.json();
+  let rawBody;
+  try { rawBody = await req.json(); } catch (_) { return jsonResponse({ error: 'Body JSON invalide' }, 400); }
+  const parsed = WizardFeedbackSchema.safeParse(rawBody);
+  if (!parsed.success) return jsonResponse({ error: 'Données invalides', details: parsed.error.flatten() }, 400);
+  const { action, itemId, tmdbId, genres = [] } = parsed.data;
   if (!action || action !== 'reject') return jsonResponse({ success: true });
 
   const contentId = normalizeContentId(tmdbId || itemId);
@@ -2694,15 +2850,15 @@ async function handleProxyTmdb(req) {
   });
   if (!res.ok) return new Response('Image not found', { status: 404 });
 
-  const buffer = await res.arrayBuffer();
+  // V0.009 : Streaming direct — pas de arrayBuffer() pour éviter les fuites mémoire
   const contentType = res.headers.get('content-type') || 'image/jpeg';
 
-  return new Response(buffer, {
+  return new Response(res.body, {
     status: 200,
     headers: {
       'Content-Type': contentType,
       'Cache-Control': 'public, max-age=86400',
-      'Access-Control-Allow-Origin': '*',
+      ...(ALLOWED_ORIGIN ? { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN } : {}),
     },
   });
 }
@@ -2748,8 +2904,11 @@ async function handleMediaRate(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
 
-  const { itemId, value, genres } = await req.json();
-  if (!itemId) return jsonResponse({ error: 'itemId requis' }, 400);
+  let rawBody;
+  try { rawBody = await req.json(); } catch (_) { return jsonResponse({ error: 'Body JSON invalide' }, 400); }
+  const parsed = MediaRateSchema.safeParse(rawBody);
+  if (!parsed.success) return jsonResponse({ error: 'Données invalides', details: parsed.error.flatten() }, 400);
+  const { itemId, value, genres } = parsed.data;
   const rating = Math.max(1, Math.min(5, parseInt(value, 10) || 0));
   if (!rating) return jsonResponse({ error: 'Note entre 1 et 5 requise' }, 400);
 
@@ -2803,13 +2962,9 @@ async function handleMediaRatingGet(req) {
  * @returns {Object} {users: [{userId, username, role, maxRating, lastLogin, createdAt}]}
  */
 async function handleAdminUsers(req) {
-  const session = await getSession(req);
-  if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
-
-  const adminProfile = await getUserProfile(session.userId);
-  if (adminProfile?.role !== 'admin') {
-    return jsonResponse({ error: 'Accès réservé aux administrateurs' }, 403);
-  }
+  const auth = await requireAdmin(req);
+  if (auth.error) return auth.error;
+  const { session } = auth;
 
   const db = await getDb();
   const users = await db.collection('users').find({}).sort({ lastLogin: -1 }).toArray();
@@ -2833,13 +2988,8 @@ async function handleAdminUsers(req) {
  * @returns {Object} {success: true, updated: {userId, role}}
  */
 async function handleAdminUsersUpdate(req) {
-  const session = await getSession(req);
-  if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
-
-  const adminProfile = await getUserProfile(session.userId);
-  if (adminProfile?.role !== 'admin') {
-    return jsonResponse({ error: 'Accès réservé aux administrateurs' }, 403);
-  }
+  const auth = await requireAdmin(req);
+  if (auth.error) return auth.error;
 
   const { userId, role, maxRating } = await req.json();
   if (!userId || !role) return jsonResponse({ error: 'userId et role requis' }, 400);
@@ -2860,6 +3010,40 @@ async function handleAdminUsersUpdate(req) {
   }
 
   return jsonResponse({ success: true, updated: { userId, role } });
+}
+
+/**
+ * GET /api/admin/telemetry
+ * Retourne les statistiques agrégées de télémétrie (admin uniquement).
+ * Inclut la ventilation par action et les 50 événements les plus récents.
+ * @param {Request} req - Session requise, rôle admin requis
+ * @returns {Object} {totalEvents, actionBreakdown, recentEvents}
+ */
+async function handleAdminTelemetry(req) {
+  const auth = await requireAdmin(req);
+  if (auth.error) return auth.error;
+
+  try {
+    const db = await getDb();
+    const totalEvents = await db.collection('telemetry').countDocuments();
+    const actionCounts = await db.collection('telemetry').aggregate([
+      { $group: { _id: '$action', count: { $sum: 1 } } },
+    ]).toArray();
+    const recentEvents = await db.collection('telemetry')
+      .find({})
+      .sort({ timestamp: -1 })
+      .limit(50)
+      .project({ userId: 1, action: 1, itemId: 1, value: 1, timestamp: 1 })
+      .toArray();
+
+    return jsonResponse({
+      totalEvents,
+      actionBreakdown: Object.fromEntries(actionCounts.map(a => [a._id, a.count])),
+      recentEvents,
+    });
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 500);
+  }
 }
 
 /**
@@ -2908,6 +3092,7 @@ async function routeGet(parts, req) {
   if (route === 'recommendations') return handleRecommendations(req);
 
   if (route === 'admin/users') return handleAdminUsers(req);
+  if (route === 'admin/telemetry') return handleAdminTelemetry(req);
 
   if (route === 'proxy/image') return handleProxyImage(req);
   if (route === 'proxy/tmdb') return handleProxyTmdb(req);
@@ -2977,15 +3162,17 @@ export async function POST(req) {
 
 /**
  * Handler CORS preflight (OPTIONS).
- * Retourne 204 No Content avec les headers CORS permissifs.
+ * Valide l'origine de la requête avant d'autoriser le cross-origin.
  */
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
+export async function OPTIONS(req) {
+  const origin = req.headers.get('origin') || '';
+  const validatedOrigin = validateOrigin(origin);
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+  if (validatedOrigin) {
+    headers['Access-Control-Allow-Origin'] = validatedOrigin;
+  }
+  return new NextResponse(null, { status: 204, headers });
 }

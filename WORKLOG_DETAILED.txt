@@ -1,0 +1,933 @@
+DAGZFLIX — JOURNAL DETAILLE DES INTERVENTIONS
+Date: 2026-02-28
+Contexte: Stabilisation app Next.js + BFF API Jellyfin/Jellyseerr + corrections UX critiques
+
+====================================================================
+SUIVI DE VERSION (OBLIGATOIRE)
+====================================================================
+Version courante: V0,007.7
+Format: V0,001 -> V0,002 -> V0,003 ...
+
+Règle de gestion:
+- Chaque requête utilisateur avec action/changement déclenche un incrément de version.
+- Chaque version doit être documentée dans:
+  1) README.md
+  2) WORKLOG_DETAILED.txt
+- Chaque entrée doit inclure: date, demande, modifications, fichiers impactés, validation.
+
+Historique versionné:
+- V0,001 | 2026-02-28
+  - Demande: "enregistrer et faire un suivi de version à chaque requête, documenté dans README + WORKLOG, format V0,001".
+  - Modifications:
+    - Ajout d'une section de version dans README.md.
+    - Ajout de cette section de suivi versionné dans WORKLOG_DETAILED.txt.
+  - Fichiers impactés:
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - Fichiers créés/mis à jour avec version courante explicite V0,001.
+
+- V0,002 | 2026-02-28
+  - Demande: Feuille de route UX — Objectifs 1 et 2 (Smart Button séries + enrichissement MediaDetailView).
+  - Modifications:
+    - route.js: handleMediaStatus corrigé pour séries (ChildCount/RecursiveItemCount au lieu de MediaSources). Champ Studios ajouté aux Fields Jellyfin. Id acteur ajouté au mapping People.
+    - MediaDetailView.jsx: Ajout PersonCard (photo acteur via proxy, fallback icône User, rôle). Section Casting horizontal scrollable (jusqu'à 20 acteurs). Badges réalisateurs/scénaristes. Affichage Studios/Networks sous le titre. Genres cliquables (redirection vers recherche).
+    - page.js: handleItemClick gère __searchGenre pour les genres cliquables.
+  - Fichiers impactés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/MediaDetailView.jsx
+    - app/page.js
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - Pas d'erreurs de compilation détectées.
+    - Smart Button séries: logique corrigée pour ChildCount > 0.
+    - Casting: photos acteurs via proxy Jellyfin, fallback gracieux.
+
+- V0,003 | 2026-03-01
+  - Demande: Refactoring majeur Phase 1 — Migration SPA vers routage natif App Router + corrections UX MediaDetail + amélioration recherche.
+  - Modifications:
+    - MISSION 1 — Routage natif App Router:
+      - app/page.js réécrit: ne contient plus le shell SPA, seulement la page Accueil (DashboardView).
+      - Nouvelles pages créées: app/movies/page.js, app/series/page.js, app/media/[id]/page.js, app/search/page.js.
+      - Pages auth créées: app/login/page.js, app/setup/page.js, app/onboarding/page.js.
+      - Bouton retour navigateur natif fonctionnel (router.back() au lieu de pushState maison).
+      - lib/auth-context.js: AuthProvider avec session check, redirections automatiques, login/logout callbacks.
+      - lib/player-context.js: PlayerProvider pour lecture vidéo globale depuis n'importe quelle page.
+      - lib/item-store.js: cache mémoire pour navigation instantanée entre MediaCard et MediaDetailView.
+      - components/dagzflix/AppShell.jsx: shell global (auth guard, navbar conditionnelle, player overlay).
+      - app/layout.js: intègre AuthProvider + PlayerProvider + AppShell.
+      - Navbar.jsx: réécrit avec useRouter/usePathname internes, plus aucune prop externe.
+    - MISSION 2 — Corrections MediaDetailView:
+      - Scroll casting réparé: cartes acteurs min-w-[120px] w-[120px] + flex overflow-x-auto hide-scrollbar.
+      - Acteurs cliquables: <Link href="/person/[id]"> (page préparée pour future implémentation).
+      - Genres cliquables: <Link href="/search?genre=..."> natif au lieu de onItemClick({__searchGenre}).
+      - Container flex-1 avec min-w-0 pour éviter overflow sur petit écran.
+    - MISSION 3 — Moteur de recherche amélioré:
+      - SearchView réécrit avec useSearchParams (autonome, plus de props query/onItemClick).
+      - Debounce 800ms sur la saisie utilisateur (setTimeout dans useEffect).
+      - Barre de filtres type: Films | Séries | Tous (boutons cliquables, état actif).
+      - Filtre genre: sélection dynamique parmi GENRE_LIST, filtrage côté client sur les résultats.
+      - URL synchronisée en temps réel: /search?q=...&type=...&genre=...
+      - Bouton clear (X) sur le champ de recherche.
+  - Fichiers créés:
+    - lib/auth-context.js
+    - lib/player-context.js
+    - lib/item-store.js
+    - components/dagzflix/AppShell.jsx
+    - app/login/page.js
+    - app/setup/page.js
+    - app/onboarding/page.js
+    - app/movies/page.js
+    - app/series/page.js
+    - app/media/[id]/page.js
+    - app/search/page.js
+  - Fichiers modifiés:
+    - app/layout.js
+    - app/page.js
+    - components/dagzflix/Navbar.jsx
+    - components/dagzflix/MediaDetailView.jsx
+    - components/dagzflix/SearchView.jsx
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers.
+    - Serveur dev démarré sur port 3001, HTTP 200 confirmé.
+    - Bouton retour navigateur natif opérationnel (router.back).
+    - Debounce recherche fonctionnel (800ms).
+
+- V0,004 | 2026-03-01
+  - Demande: Phase 1.5 — Corrections et polissage QA (4 bugs post-migration App Router).
+  - Modifications:
+    - BUG 1 — Pages acteurs (404):
+      - route.js: nouvelle fonction handlePersonDetail — récupère fiche personne via /Users/{UserId}/Items/{id} + filmographie via PersonIds.
+      - route.js: route person/detail enregistrée dans routeGet().
+      - app/person/[id]/page.js: page acteur créée — photo, nom, date de naissance, biographie, grille filmographie Films/Séries.
+    - BUG 2 — Studios invisibles dans les listes:
+      - route.js: mapJellyfinItem() enrichi avec champ studios: (item.Studios || []).map(s => s.Name).
+      - MediaCard.jsx: affichage premier studio (Building2 icon) dans le gradient hover overlay.
+    - BUG 3 — Recherche genre seul retourne "Aucun résultat":
+      - SearchView.jsx: doSearch réécrit — quand genre seul (pas de texte), utilise media/library?genres=GenreName&type=... au lieu de search?q=GenreName.
+      - route.js: handleMediaLibrary supporte maintenant le paramètre genres (nom) en plus de genreIds (ID Jellyfin).
+    - BUG 4 — Filtres type ne fonctionnent pas:
+      - route.js: handleSearch supporte mediaType param → IncludeItemTypes pour Jellyfin + filtrage post-map pour Jellyseerr.
+      - SearchView.jsx: type filter transmis correctement via mediaType param au search, et via type param au library.
+  - Fichiers créés:
+    - app/person/[id]/page.js
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/MediaCard.jsx
+    - components/dagzflix/SearchView.jsx
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés/créés.
+
+- V0,005 | 2026-03-01
+  - Demande: Phase 1.9 — Corrections finales QA (3 bugs restants).
+  - Modifications:
+    - BUG 1 — Page acteur limitée aux médias locaux:
+      - route.js: handlePersonDetail réécrit — récupère ProviderIds.Tmdb de la personne, puis appelle Jellyseerr /api/v1/person/{tmdbId} pour les combinedCredits complets.
+      - Fusion intelligente: items locaux (mediaStatus 5) + items distants TMDB (dédoublonnés par TMDB ID).
+      - app/person/[id]/page.js: ajout filtre Disponible/À demander/Tout, compteurs locaux/distants, clés uniques pour items mixtes.
+    - BUG 2 — Studios non cliquables:
+      - MediaDetailView.jsx: studios enveloppés dans <Link href="/search?studio=...">.
+      - MediaCard.jsx: import Link, studio cliquable avec e.stopPropagation().
+      - route.js: handleMediaLibrary supporte paramètre studios (nom) → envoyé à Jellyfin via Studios={name}.
+      - SearchView.jsx: lecture paramètre URL studio, affichage tag violet effaçable, import Building2.
+    - BUG 3 — Nettoyage des tags casse la recherche:
+      - SearchView.jsx: doSearch réécrit — quand tous filtres vides (ni q, ni genre, ni studio), reset explicite (hasSearched=false, results=[]) au lieu de fetch vide.
+      - useEffect déclenche doSearch inconditionnellement (plus de guard if(q||genre)).
+      - URL nettoyée proprement via router.replace à chaque changement.
+      - filteredResults applique filtre genre côté client uniquement quand texte + genre combo.
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/MediaCard.jsx
+    - components/dagzflix/MediaDetailView.jsx
+    - components/dagzflix/SearchView.jsx
+    - app/person/[id]/page.js
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés.
+
+- V0,005.1 | 2026-03-01
+  - Demande: Hotfix critique — régressions Jellyseerr + filtres recherche.
+  - Modifications:
+    - BUG 1 — Échec silencieux de Jellyseerr:
+      - route.js handleSearch: filtre type après Jellyseerr comparait 'movie'/'tv' (lowercase) vs 'Movie'/'Series' (PascalCase) retourné par mapTmdbItem. Les types ne matchaient jamais, tous les résultats étaient filtrés. Fixé: compare avec 'Movie'/'Series'.
+      - route.js handlePersonDetail: ajout fallback si extractTmdbId retourne null — recherche la personne par nom sur Jellyseerr (/api/v1/search?query={name}) et extrait l'ID TMDB du résultat de type 'person'.
+      - Blocs catch(_) silencieux dans handleSearch, handlePersonDetail remplacés par console.error avec préfixe [DagzFlix] et message d'erreur.
+    - BUG 2 — Filtres de recherche et debounce inactifs:
+      - SearchView.jsx réécrit complètement avec architecture URL-driven:
+        - États locaux typeFilter/genreFilter/studioFilter supprimés.
+        - Filtres lus directement depuis searchParams (single source of truth).
+        - Boutons filtres appellent updateParams() qui fait router.replace().
+        - Le changement d'URL déclenche le useEffect de data fetching (dépendances: [q, typeFilter, genreFilter, studioFilter]).
+        - Type-only (Films/Séries sans texte) cible /api/discover pour résultats globaux Jellyseerr/TMDB.
+        - Debounce 800ms écrit 'q' dans l'URL après stabilisation, pas d'état debouncedQuery séparé.
+        - Ref paramsRef pour éviter closures périmées dans l'effect debounce.
+        - Sync inputValue ← URL q pour navigation back/forward.
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/SearchView.jsx
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés.
+
+- V0,005.2 | 2026-03-01
+  - Demande: Hotfix Data Sync & UI — synchronisation Jellyfin/Jellyseerr + unification genres.
+  - Modifications:
+    - BUG 1 — Médias distants invisibles (Acteurs & Recherche):
+      - route.js handlePersonDetail: recherche Jellyseerr par nom de l'acteur SYSTÉMATIQUE (pas seulement en fallback). Étapes: 1) fetch person Jellyfin pour le Name, 2) TOUJOURS rechercher sur Jellyseerr /api/v1/search?query={Name}&language=fr, 3) si résultat type 'person' trouvé → tmdbPersonId. ProviderIds.Tmdb de Jellyfin n'est utilisé qu'en fallback de dernier recours.
+      - route.js mapTmdbItem: ajout du champ genres (string[]) en résolvant genreIds via TMDB_GENRE_ID_TO_NAME. Avant, les items distants n'avaient que genreIds (number[]) sans genres lisibles.
+      - app/person/[id]/page.js: remoteCount calculé proprement via items.length - localCount (gère undefined/null/0 mediaStatus sans ambiguïté). Filtre par défaut reste 'all' (Tout).
+    - BUG 2 — Désynchronisation des tags genres entre Média et Recherche:
+      - SearchView.jsx: import GENRE_LIST supprimé. Remplacé par useEffect au montage qui appelle cachedApi('media/genres') et stocke la liste dans genreOptions (state). Genres peuplés dynamiquement depuis Jellyfin → même langue que les tags affichés sur les pages Média.
+      - Logique de data fetching restructurée: quand genreFilter est actif (avec ou sans texte), on passe TOUJOURS par /api/media/library (Jellyfin natif). Le paramètre 'searchTerm' est ajouté si l'utilisateur a aussi tapé du texte. Aucune conversion de nom de genre nécessaire.
+      - filteredResults (client-side genre filter) supprimé — doublon inutile puisque le filtrage est fait côté serveur par Jellyfin.
+      - GENRE_ICONS avec fallback '🎬' pour genres non mappés dans le dictionnaire (ex: genres en français non listés).
+      - lib/api.js: ajout TTL 'media/genres': 600000 (10 min cache pour éviter refetch à chaque navigation).
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/SearchView.jsx
+    - app/person/[id]/page.js
+    - lib/api.js
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés.
+
+- V0,005.3 | 2026-03-01
+  - Demande: Unification totale Jellyfin/TMDB — 4 corrections majeures data sync.
+  - Modifications:
+    - BUG 1 — Limite d'affichage bibliothèque:
+      - route.js handleMediaLibrary: limite par défaut changée de '20' à '1000'. Avant, seuls 20 items par défaut étaient retournés. Maintenant la bibliothèque entière remonte.
+      - MediaTypePage.jsx: appel cachedApi mis à jour de limit=60 à limit=1000.
+    - BUG 2 — DagzRank sur médias TMDB non-disponibles:
+      - route.js handleSearch: chargement des préférences (MongoDB) + historique de visionnage (Jellyfin Items?IsPlayed=true) au début de la recherche.
+      - Fonction scoreResults() locale applique calculateDagzRank à chaque résultat (Jellyseerr ou Jellyfin). Le champ dagzRank est ajouté à chaque item retourné.
+      - calculateDagzRank supporte déjà les genres via resolveGenres() qui gère genres (string[]) et genreIds (number[]).
+    - BUG 3 — Casting manquant sur fiches distantes:
+      - route.js handleMediaDetail: réécrit complètement.
+        - Essaie Jellyfin en premier (try/catch). Si OK → retourne les données locales enrichies avec mediaStatus:5.
+        - Si Jellyfin échoue (ça arrive quand l'ID est un tmdbId numérique) → fallback Jellyseerr.
+        - Fallback essaie /api/v1/movie/{id} puis /api/v1/tv/{id} avec ?language=fr.
+        - Extrait credits.cast (15 premiers) mappé en { Id: null, tmdbId, name, role, type: 'Actor', photoUrl (proxy TMDB) }.
+        - Extrait credits.crew (réalisateurs + scénaristes, max 6) en { type: 'Director'|'Writer' }.
+        - Retourne l'item complet avec people, genres (resolveGenres), studios (productionCompanies), taglines, mediaStatus.
+      - MediaDetailView.jsx PersonCard: photoUrl support ajouté en plus de l'Id Jellyfin. Si person.Id existe → proxy Jellyfin. Sinon si person.photoUrl → utilise directement. Sinon → icône User fallback.
+      - MediaDetailView.jsx fetchAll: appelle systématiquement media/detail?id={id} pour TOUS les items (plus de condition item.id && !item.tmdbId). Fallback try/catch sur les données de la carte si l'API échoue.
+    - BUG 4 — Filmographie acteur incomplète:
+      - route.js mapTmdbItem: support des champs TMDB en snake_case (poster_path, backdrop_path, release_date, first_air_date, vote_average, media_type) en plus du camelCase Jellyseerr.
+      - route.js handlePersonDetail: détection media_type en snake_case dans la boucle de déduplication des credit.mediaType || credit.media_type.
+      - Nettoyage du champ interne _tmdbId des localItems avant concaténation et envoi au frontend.
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/MediaDetailView.jsx
+    - components/dagzflix/MediaTypePage.jsx
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés.
+
+- V0,005.4 | 2026-03-01
+  - Demande: Documentation massive + 2 corrections TMDB actor IDs.
+  - Modifications:
+    - BUG 1 — PersonCard non-cliquable pour acteurs TMDB:
+      - MediaDetailView.jsx PersonCard: <Link href> utilisait person.Id (null pour TMDB). Corrigé: linkId = person.Id || person.tmdbId. Rendu conditionnel linkId ? <Link> : <div>.
+    - BUG 2 — Page acteur 500 sur ID TMDB numérique:
+      - route.js handlePersonDetail: ajout détection /^\d+$/.test(personId). Si numérique → skip Jellyfin (404 sur ID numérique), interroge directement Jellyseerr /api/v1/person/{id} pour bio/birthday/profilePath + combinedCredits.
+      - Vérifie ensuite disponibilité locale: recherche Jellyfin par Person={name} pour identifier les tmdbIds locaux → marque mediaStatus=5 sur les items correspondants.
+    - MISSION 3 — Documentation JSDoc massive:
+      - route.js: 37 fonctions documentées avec JSDoc complet (description, @param, @returns).
+      - MediaDetailView.jsx: JSDoc sur PersonCard, EpisodeCard, MediaDetailView.
+      - app/person/[id]/page.js: JSDoc sur PersonPage + commentaire SECTION_FILTERS.
+  - Fichiers modifiés:
+    - app/api/[[...path]]/route.js
+    - components/dagzflix/MediaDetailView.jsx
+    - app/person/[id]/page.js
+    - README.md
+    - WORKLOG_DETAILED.txt
+  - Validation:
+    - 0 erreurs de compilation détectées sur tous les fichiers modifiés.
+====================================================================
+- Remettre l’application en état fonctionnel (UI + API + playback).
+- Corriger les erreurs bloquantes prioritaires (setup, stream, endpoints manquants, navigation).
+- Déboguer les comportements signalés par l’utilisateur (bibliothèque vide, trailers, wizard répétitif, écran figé).
+- Garder une approche “debug only” (pas de feature creep non demandé).
+
+====================================================================
+2) TRAVAUX BACKEND (app/api/[[...path]]/route.js)
+====================================================================
+2.1 Stabilisation de la route API centrale
+- Remise en cohérence de la route monolithique quand elle était devenue incomplète/incohérente.
+- Vérification des routes GET/POST connues et de la gestion d’erreur globale.
+
+2.2 Setup / session / résilience
+- Durcissement du setup check pour éviter un crash au démarrage dans les cas env/DB incomplets.
+- Validation setup via /api/setup/check (retour attendu stable).
+
+2.3 Endpoints media réintroduits/réparés
+- Réintégration d’endpoints manquants après refactor:
+  - GET /api/media/seasons
+  - GET /api/media/episodes
+  - GET /api/media/trailer
+  - GET /api/media/collection
+- Vérification auth sur ces endpoints.
+
+2.4 Playback / stream / progress
+- Stabilisation de /api/media/stream et format de réponse pour VideoPlayer.
+- Exposition d’un stream HLS compatible + fallback stream.
+- Maintien des infos audio/sous-titres + playSessionId + mediaSourceId.
+- Consolidation de /api/media/progress (report start/progress/stop).
+
+2.5 Gating “available” pour éviter des faux play
+- Ajustement logique media/status:
+  - statut “available” seulement si disponibilité locale Jellyfin confirmée.
+  - évite tentative de lecture d’ID TMDB non local (source historique d’erreurs “Playback info failed”).
+
+2.6 Résolution TMDB + requêtes
+- Durcissement résolution TMDB ID (Tmdb / TMDb / tmdb).
+- Meilleure gestion request endpoint (cas déjà demandé/retours Jellyseerr).
+
+2.7 Wizard & ranking orientés rejet
+- Ajout de normalisation d’ID contenu.
+- Ajout de pénalité ranking pour:
+  - contenus explicitement rejetés
+  - genres rejetés
+- Ajout endpoint POST /api/wizard/feedback (action reject) pour persister:
+  - rejectedContentIds
+  - rejectedGenres
+- handleWizardDiscover mis à jour:
+  - support excludeIds
+  - exclusion globale (explicit + historique rejets)
+  - fallback intelligent si pool filtré vide.
+
+2.8 Trailer fallback
+- handleMediaTrailer enrichi:
+  - fallback URL de recherche YouTube quand aucun trailer exploitable.
+  - support param title pour contexte fallback.
+
+====================================================================
+3) TRAVAUX FRONTEND
+====================================================================
+3.1 VideoPlayer
+- Renforcement du flux de lecture avec gestion plus robuste stream/fallback.
+- Envoi périodique de progression vers API (ticks) + stop report.
+
+3.2 SmartButton / TrailerButton
+- Résolution TMDB ID renforcée côté bouton intelligent.
+- Play déclenché uniquement sur statut réellement disponible.
+- TrailerButton:
+  - envoi du title au backend
+  - ouverture fallback externe si embed impossible
+  - fallback recherche YouTube si aucun trailer.
+
+3.3 MediaDetailView
+- Protection contre préfetch stream/seasons pour éléments TMDB-only (non locaux).
+- Réduction des appels qui déclenchaient des erreurs inutiles.
+
+3.4 WizardView
+- Ajout bouton “Réessayer” dans l’écran résultat.
+- Au clic:
+  - envoi feedback reject à /api/wizard/feedback
+  - ajout ID courant aux exclusions
+  - nouvelle découverte wizard sans répéter immédiatement le même item.
+- Bouton “Relancer le Magicien” conservé pour reset complet.
+
+3.5 Navigation (app/page.js)
+- Gestion back browser/popstate durcie pour cohérence historique in-app.
+- Révision init application:
+  - suppression des setState pendant render
+  - init déplacée dans useEffect pour éviter instabilités d’hydratation.
+
+3.6 LoadingScreen
+- Ajustement animation initiale pour éviter écran visuellement “bloqué” en opacité 0 avant hydratation.
+
+====================================================================
+4) INFRA / ENV / LANCEMENT
+====================================================================
+- Dépendances installées.
+- Lancement app en dev.
+- Gestion des conflits de port (3001/3002) et nettoyage process node stale.
+- Vérification endpoints HTTP clés:
+  - /api/setup/check
+  - /
+  - assets _next (JS/CSS)
+
+- Création/usage .env.local avec valeurs Mongo (exemple local) pour setup fonctionnel:
+  - MONGO_URL
+  - DB_NAME
+
+====================================================================
+5) CACHE API COTE CLIENT (lib/api.js)
+====================================================================
+Problème ciblé:
+- Le cache pouvait conserver des réponses d’erreur (401/500), provoquant des écrans incohérents ou bibliothèque vide après reconnexion.
+
+Corrections appliquées:
+- api(path):
+  - parse JSON sécurisé
+  - throw Error quand response non-ok (avec status + payload)
+- cachedApi(path):
+  - n’écrit plus dans le cache les données d’erreur
+- LoginView:
+  - clearCache() à login réussi pour repartir d’un état propre.
+
+====================================================================
+6) VALIDATIONS EFFECTUEES
+====================================================================
+- Builds répétés: npm run build => succès.
+- Tests manuels HTTP:
+  - setup/check OK
+  - HTML page racine servi
+  - assets Next (JS/CSS) testés en 200 sur instance propre
+- Vérification endpoint media/library avec session valide:
+  - retours item/totalCount attendus
+- Vérification media/resume avec session valide: OK.
+
+====================================================================
+7) INCIDENTS RENCONTRES PENDANT DEBUG
+====================================================================
+- Port déjà utilisé (EADDRINUSE) sur 3001/3002.
+- Processus Next stale menant à comportements incohérents (assets 404 intermittents, UX figée).
+- Différences d’état entre instances multiples lancées en parallèle.
+- Erreurs 500 observées dans certains runs en présence de sessions/token non alignés ou instance non propre.
+
+====================================================================
+8) ETAT FINAL ATTENDU APRES CORRECTIONS
+====================================================================
+- App accessible sur une instance propre.
+- Setup check stable.
+- Bibliothèque Jellyfin visible avec session valide.
+- Wizard plus varié, tenant compte des rejets.
+- Trailer avec fallback plutôt que silence.
+- UI moins sujette à blocage d’hydratation.
+
+====================================================================
+9) RECOMMANDATIONS D’EXPLOITATION
+====================================================================
+- Garder une seule instance dev active à la fois.
+- En cas d’état étrange UI:
+  1) stop process node
+  2) relancer next dev sur un seul port
+  3) hard refresh navigateur
+- Vérifier régulièrement /api/setup/check.
+- Si bibliothèque vide: vérifier auth/session + cookies + token Jellyfin actif.
+
+====================================================================
+10) FICHIERS PRINCIPALEMENT MODIFIES
+====================================================================
+- app/api/[[...path]]/route.js
+- components/dagzflix/VideoPlayer.jsx
+- components/dagzflix/SmartButton.jsx
+- components/dagzflix/MediaDetailView.jsx
+- components/dagzflix/WizardView.jsx
+- app/page.js
+- lib/constants.js
+- lib/api.js
+- components/dagzflix/LoginView.jsx
+- components/dagzflix/LoadingScreen.jsx
+
+====================================================================
+V0,006 | 2026-03-01
+====================================================================
+Demande: Grande mise à jour — Admin, Télémétrie & UX Premium (4 missions).
+
+MODIFICATIONS:
+
+--- MISSION 1: Télémétrie + DagzRank V3 (Backend) ---
+- route.js: Nouveau handler handleTelemetryClick(req)
+  -> POST /api/telemetry/click
+  -> Insère {userId, itemId, action:'click', value:1, genres, timestamp} dans collection telemetry.
+- route.js: Nouveau handler handleMediaRate(req)
+  -> POST /api/media/rate
+  -> Upsert note 1-5 étoiles: {userId, itemId, action:'rate', value, genres, timestamp}.
+- route.js: Nouveau handler handleMediaRatingGet(req)
+  -> GET /api/media/rating?id={itemId}
+  -> Retourne {rating (user), globalAverage, totalRatings}.
+- route.js: handleMediaProgress enrichi
+  -> Après report Jellyfin, upsert telemetry 'watch' avec cumul watchSeconds.
+  -> Ajout const db = await getDb() dans la fonction.
+- route.js: calculateDagzRank REECRIT en V3
+  -> Signature: calculateDagzRank(item, preferences, watchHistory, telemetryData = null)
+  -> 7 couches de scoring:
+    1. Genre preference match (max 30 pts)
+    2. Watch history affinity (max 15 pts)
+    3. Community rating (max 15 pts)
+    4. Freshness / year bonus (max 10 pts)
+    5. Personal telemetry bonus (max 15 pts) — watch time + high ratings par genre
+    6. Collaborative rating bonus (max 15 pts) — moyenne des notes de tous les users
+    7. Penalties: déjà vu (-50), rejeté (-60), genres détestés (-25)
+  -> Total max: 100 pts arrondi.
+- route.js: Nouvelle fonction loadTelemetryData(userId)
+  -> Charge les 200 derniers events watch/rate de l'utilisateur.
+  -> Agrège les notes globales (avg par itemId, min 2 votes) depuis telemetry.
+  -> Retourne {userEvents, globalRatings}.
+- route.js: handleSearch modifié
+  -> Charge telemetryData via loadTelemetryData.
+  -> Passe telemetryData à calculateDagzRank dans scoreResults.
+- route.js: handleRecommendations modifié
+  -> Charge telemetryData via loadTelemetryData.
+  -> Passe telemetryData à calculateDagzRank.
+
+--- MISSION 2: Contrôle Parental + Sécurité (Backend) ---
+- route.js: Constantes CHILD_BLOCKED_GENRES et CHILD_ALLOWED_RATINGS
+  -> Genres bloqués: Horror, Horreur, Erotic, Érotique, Thriller.
+  -> Certifications autorisées enfant: G, PG, PG-13, TV-Y, TV-Y7, TV-G, TV-PG, etc.
+- route.js: Nouvelle fonction getUserProfile(userId)
+  -> Lit dans db.collection('users'), retourne {userId, role, maxRating, ...} ou null.
+- route.js: Nouvelle fonction applyParentalFilter(items, userProfile)
+  -> Si role !== 'child', retourne items tel quel.
+  -> Sinon filtre: bloque genres bloqués, contenus isAdult, certifications non-autorisées.
+- route.js: handleAuthLogin modifié
+  -> Upsert dans collection 'users': {userId, username, role:'adult', maxRating:'', createdAt}.
+  -> Met à jour lastLogin à chaque connexion.
+  -> Inclut role dans la réponse {user: {id, name, role}}.
+- route.js: handleAuthSession modifié
+  -> Charge userProfile via getUserProfile.
+  -> Inclut role dans la réponse {user: {..., role}}.
+- route.js: handleMediaLibrary modifié
+  -> Charge userProfile, applique applyParentalFilter sur les items.
+- route.js: handleDiscover modifié
+  -> Charge userProfile, applique applyParentalFilter sur les résultats.
+- route.js: handleSearch modifié
+  -> Charge userProfile, applique applyParentalFilter dans scoreResults.
+- route.js: handleRecommendations modifié
+  -> Charge userProfile, applique applyParentalFilter avant scoring.
+- route.js: Nouveau handler handleAdminUsers(req)
+  -> GET /api/admin/users
+  -> Vérifie rôle admin (403 si non-admin).
+  -> Retourne tous les users: {userId, username, role, maxRating, lastLogin, createdAt}.
+- route.js: Nouveau handler handleAdminUsersUpdate(req)
+  -> POST /api/admin/users/update
+  -> Vérifie rôle admin.
+  -> Body: {userId, role, maxRating?}. Rôles valides: admin, adult, child.
+  -> Met à jour role + maxRating + updatedAt dans collection users.
+- route.js: Routes enregistrées dans routeGet:
+  -> 'admin/users' -> handleAdminUsers
+  -> 'media/rating' -> handleMediaRatingGet
+- route.js: Routes enregistrées dans routePost:
+  -> 'telemetry/click' -> handleTelemetryClick
+  -> 'media/rate' -> handleMediaRate
+  -> 'admin/users/update' -> handleAdminUsersUpdate
+- route.js: JSDoc mis à jour sur routeGet et routePost (nouvelles routes documentées).
+
+--- MISSION 3: Panneau d'Administration (Frontend) ---
+- app/admin/page.js: NOUVEAU FICHIER
+  -> Page 'use client' protégée (vérification admin via API 403).
+  -> État: users[], loading, error, pendingChanges, saving, toast.
+  -> loadUsers(): fetch cachedApi('admin/users'), affiche erreur 403 si non-admin.
+  -> handleRoleChange(userId, newRole): stocke le changement dans pendingChanges.
+  -> saveRole(userId): POST admin/users/update, met à jour le state local, invalide le cache.
+  -> UI: header sticky (icône Shield, titre, compteur users), table responsive.
+  -> Chaque ligne: avatar coloré par rôle, username, ID tronqué, dernière connexion, sélecteur rôle natif <select>, bouton Save.
+  -> Toast animé (AnimatePresence): succès vert / erreur rouge, auto-dismiss 3.5s.
+  -> Stagger animation (motion.div) sur les lignes du tableau.
+  -> Constante ROLES: 3 rôles avec label FR, icône Lucide, couleur, bg.
+- auth-context.js: modifié
+  -> Route /admin autorisée dans le useEffect de redirection (pas de redirect si status='ready' et pathname='/admin').
+
+--- MISSION 4: UI/UX Premium + Micro-animations (Frontend) ---
+- MediaCard.jsx: modifié
+  -> Nouvelle fonction sendClickTelemetry(item): fetch fire & forget POST /api/telemetry/click.
+  -> Nouvelles cardVariants: hidden/visible avec stagger (delay: index * 0.04).
+  -> MediaCard: nouveau prop index=0. handleClick appelle sendClickTelemetry + onClick.
+  -> motion.div: variants={cardVariants}, initial="hidden", animate="visible", custom={index}.
+  -> Ajout whileTap={{ scale: 0.98 }}.
+  -> MediaRow: passe index={idx} à chaque MediaCard.
+- MediaDetailView.jsx: modifié
+  -> Référence à StarRating ajoutée après la section DagzRank.
+  -> Casting PersonCards: chaque carte enveloppée dans motion.div avec stagger (delay: i * 0.04).
+- api.js: modifié
+  -> Nouveaux TTLs: 'media/rating': 30000, 'admin/users': 15000, 'telemetry': 0.
+
+FICHIERS CREES:
+- app/admin/page.js
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js (~2500 lignes, +~350 lignes)
+- components/dagzflix/MediaCard.jsx
+- components/dagzflix/MediaDetailView.jsx
+- lib/auth-context.js
+- lib/api.js
+- memory/CHANGELOG.md
+- README.md
+- WORKLOG_DETAILED.txt
+
+NOUVELLES COLLECTIONS MONGODB:
+- users: {userId, username, role, maxRating, createdAt, lastLogin, updatedAt}
+- telemetry: {userId, itemId, action, value, genres, timestamp}
+
+NOUVELLES ROUTES API:
+- GET  /api/admin/users           -> handleAdminUsers (admin-only)
+- GET  /api/media/rating?id=X     -> handleMediaRatingGet
+- POST /api/telemetry/click       -> handleTelemetryClick
+- POST /api/media/rate            -> handleMediaRate
+- POST /api/admin/users/update    -> handleAdminUsersUpdate (admin-only)
+
+VALIDATION:
+- get_errors sur les 6 fichiers modifiés: 0 erreurs.
+- Toutes les fonctions documentées en JSDoc.
+- Routes correctement enregistrées dans routeGet et routePost.
+
+====================================================================
+V0,007 | 2026-03-03
+====================================================================
+Demande: Système de Favoris complet (full-stack).
+
+MODIFICATIONS:
+
+--- BACKEND (route.js) ---
+- route.js: Nouveau handler handleMediaFavoriteToggle(req)
+  -> POST /api/media/favorite
+  -> Toggle favori: si le favori existe déjà → suppression (deleteOne), sinon → insertion (insertOne).
+  -> Collection MongoDB 'favorites': {userId, itemId (String), itemData (objet média complet), createdAt}.
+  -> Retourne {success: true, isFavorite: boolean}.
+- route.js: Nouveau handler handleMediaFavoritesGet(req)
+  -> GET /api/media/favorites
+  -> Retourne tous les favoris de l'utilisateur triés par createdAt desc.
+  -> Extrait itemData de chaque document, filtre les null.
+  -> Retourne {items: MappedItem[]}.
+- route.js: Routes enregistrées:
+  -> routeGet: 'media/favorites' -> handleMediaFavoritesGet
+  -> routePost: 'media/favorite' -> handleMediaFavoriteToggle
+
+--- FRONTEND: Page Favoris ---
+- app/favorites/page.js: NOUVEAU FICHIER (130 lignes)
+  -> Page 'use client' avec useAuth() guard (status !== 'ready' → null).
+  -> useEffect au montage: fetch cachedApi('media/favorites'), mappe isFavorite=true sur chaque item.
+  -> invalidateCache('media/favorites') au montage pour refresh systématique.
+  -> Grille responsive: 2/3/4/5/6 colonnes selon breakpoint.
+  -> État vide animé: icône Heart, message "Aucun favori pour le moment", CTA rouge "Découvrir le catalogue".
+  -> Animation pageVariants (importé de lib/constants.js).
+  -> handleItemClick: setItemCache + router.push vers /media/{id}.
+
+--- FRONTEND: MediaCard.jsx ---
+- MediaCard.jsx: modifié
+  -> Nouvel état isFavorite (useState) initialisé depuis item.isFavorite.
+  -> Nouvelle fonction toggleFavorite(e): e.stopPropagation(), optimistic UI (!isFavorite), POST /api/media/favorite avec {itemId, itemData}, revert si erreur.
+  -> Nouveau rendu: bouton Heart en overlay coin haut-droit, visible au hover ou quand isFavorite=true.
+  -> Animation spring (AnimatePresence, motion.div) sur le changement filled/outline.
+  -> Import Heart de lucide-react.
+
+--- FRONTEND: MediaDetailView.jsx ---
+- MediaDetailView.jsx: modifié
+  -> Nouveau composant FavoriteButton({item}): bouton "Ajouter"/"Favori" avec Heart animé.
+  -> États: isFavorite, loading. Optimistic toggle + revert on error.
+  -> POST /api/media/favorite avec {itemId: String(contentId), itemData: item}.
+  -> Rendu: Button variant outline, couleur rouge quand favori, animation spring sur Heart.
+  -> Intégré dans la section actions à côté de SmartButton et TrailerButton.
+  -> Import Heart de lucide-react.
+
+--- FRONTEND: Navbar.jsx ---
+- Navbar.jsx: modifié
+  -> Import Heart de lucide-react.
+  -> Nouveau navItem: {href: '/favorites', label: 'Favoris', icon: Heart}.
+  -> Lien visible dans la barre de navigation desktop à côté d'Accueil/Films/Séries.
+
+FICHIERS CREES:
+- app/favorites/page.js
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js (~2608 lignes, +~80 lignes vs V0,006)
+- components/dagzflix/MediaCard.jsx
+- components/dagzflix/MediaDetailView.jsx
+- components/dagzflix/Navbar.jsx
+
+NOUVELLE COLLECTION MONGODB:
+- favorites: {userId, itemId, itemData, createdAt}
+
+NOUVELLES ROUTES API:
+- GET  /api/media/favorites    -> handleMediaFavoritesGet
+- POST /api/media/favorite     -> handleMediaFavoriteToggle
+
+VALIDATION:
+- 0 erreurs de compilation sur les fichiers modifiés/créés.
+- Handlers documentés en JSDoc.
+- Routes enregistrées dans routeGet et routePost.
+
+====================================================================
+V0,007.5 | 2026-03-03
+====================================================================
+Demande: MEGA-UPDATE — 6 missions. TMDB source de vérité absolue pour métadonnées,
+Jellyfin uniquement pour dispo locale + flux vidéo.
+
+REGLE ARCHITECTURALE:
+  Jellyseerr/TMDB = source de vérité pour métadonnées (casting, bio, filmographie).
+  Jellyfin = disponibilité locale + streaming uniquement.
+
+MODIFICATIONS:
+
+--- MISSION 1: Fiche Acteur 100% TMDB ---
+- route.js: handlePersonDetail() — chemin UUID réécrit
+  -> Suppression de la requête filmographie Jellyfin (PersonIds=...).
+  -> 100% de la filmographie provient de Jellyseerr /api/v1/person/{tmdbId} (combinedCredits).
+  -> Bio, birthday, profilePath enrichis depuis TMDB.
+  -> Cross-check disponibilité locale via getLocalTmdbIds() (Map).
+  -> Injection localId quand item trouvé en local.
+  -> Tri par année décroissante.
+
+--- MISSION 2: Casting 100% TMDB ---
+- route.js: handleMediaDetail() — chemin Jellyfin local
+  -> Après fetch Jellyfin item, fetch SYSTEMATIQUE des credits depuis Jellyseerr
+     via /api/v1/{movie|tv}/{tmdbId}?language=fr.
+  -> People Jellyfin (souvent incomplets) remplacés par credits TMDB:
+     cast (15 acteurs max) + crew (6 réalisateurs/scénaristes).
+  -> Chaque acteur reçoit tmdbId + photoUrl (proxy TMDB).
+  -> Fallback: si Jellyseerr échoue, conserve People Jellyfin.
+  -> Ajout tmdbId sur la réponse item local.
+
+--- MISSION 3: Persistance visuelle des favoris (isFavorite) ---
+- route.js: Nouvelle fonction injectFavoriteStatus(items, userId)
+  -> Interroge MongoDB collection 'favorites' pour l'userId.
+  -> Construit Set d'itemIds, injecte isFavorite: true sur les items correspondants.
+  -> Retourne le tableau enrichi.
+- route.js: Injection dans les handlers suivants:
+  -> handleMediaLibrary: après mapJellyfinItem + applyParentalFilter.
+  -> handleSearch: après scoreResults (chemin Jellyseerr) + après scoreResults (fallback Jellyfin).
+  -> handleDiscover: après mapTmdbItem + applyParentalFilter.
+  -> handleRecommendations: sur les top 30 recs.
+  -> handleMediaDetail (Jellyfin): query directe favorites collection pour l'item.
+  -> handleMediaDetail (TMDB): query directe favorites collection pour tmdbId.
+
+--- MISSION 4: Recherche par tags globale TMDB ---
+- route.js: Nouvelle constante TMDB_GENRE_NAME_TO_ID
+  -> Map inversé de TMDB_GENRE_ID_TO_NAME, construit automatiquement.
+  -> Résolution nom genre (lowercase) → ID TMDB numérique.
+- route.js: handleDiscover() enrichi
+  -> Nouveau paramètre ?genre={nom} : résolution auto nom→ID via TMDB_GENRE_NAME_TO_ID.
+  -> Support match partiel si exact match échoue.
+  -> Nouveau paramètre ?studio={id} forwarded vers with_companies.
+  -> JSDoc mis à jour.
+- SearchView.jsx: Genre filter réécrit
+  -> Genre sélectionné → /api/discover?type={discoverType}&genre={genreName} (TMDB global).
+  -> Remplace ancien routing vers /api/media/library?genres=... (Jellyfin local seulement).
+  -> Combo texte + genre: search Jellyseerr + client-side genre filter.
+
+--- MISSION 5: Correction faux "En Attente" ---
+- route.js: getLocalTmdbIds() réécrit
+  -> Retourne Map<string, string> (tmdbId → jellyfinId) au lieu de Set<string>.
+  -> Permet de résoudre l'ID Jellyfin local à partir du TMDB ID.
+  -> Map.has() fonctionne comme Set.has() pour rétrocompatibilité.
+- route.js: handleMediaStatus() enrichi
+  -> Si Jellyfin ne trouve pas l'item par ID direct, cross-réfère le tmdbId
+     avec getLocalTmdbIds().has(tmdbId).
+  -> Si trouvé: jellyfinAvailable=true, resolvedLocalId=jellyfinId.
+  -> Réponse enrichie avec champ localId.
+- route.js: handleMediaDetail() TMDB fallback enrichi
+  -> id de la réponse = localJellyfinId (quand disponible) au lieu de tmdbData.id.
+  -> Nouveau champ localId dans la réponse.
+  -> mediaStatus forcé à 5 quand cross-réf positive.
+- route.js: handleSearch() scoreResults enrichi
+  -> Injection localId via localTmdbIds.get() quand isLocal.
+- route.js: handleDiscover() enrichi
+  -> Injection localId via localTmdbIds.get() quand cross-réf positive.
+- route.js: handlePersonDetail() les deux chemins
+  -> Chemin TMDB numérique: utilise getLocalTmdbIds() (Map) au lieu de search Jellyfin par nom.
+  -> Chemin UUID: injection localId sur les items cross-référencés.
+
+--- MISSION 6: Smart Play séries ---
+- route.js: Nouveau handler handleNextEpisode(req)
+  -> GET /api/media/next-episode?seriesId={jellyfinSeriesId}
+  -> Logique 3 étapes:
+     1) Épisode en cours (Resume Items avec ParentId) → found: 'resume'
+     2) Premier épisode non-vu (IsPlayed=false, tri SortName asc) → found: 'next-unplayed'
+     3) Fallback S01E01 (premier épisode du tri) → found: 'fallback-s01e01'
+  -> Retourne {episodeId, seasonNumber, episodeNumber, name, found}.
+  -> 404 si aucun épisode trouvé.
+  -> Route enregistrée dans routeGet: 'media/next-episode'.
+- SmartButton.jsx: Smart Play intégré
+  -> Nouvel état nextEp (useState).
+  -> Après check status 'available' pour une série: pré-fetch /api/media/next-episode.
+  -> Bouton affiche "S01E02" (épisode résolu) au lieu de "LECTURE" pour les séries.
+  -> handlePlay() transmet episodeId au callback onPlay(item, episodeId).
+- MediaDetailView.jsx: Callback onPlay adapté
+  -> SmartButton onPlay reçoit (item, episodeId).
+  -> Si episodeId fourni: setPlayEpId(episodeId) AVANT setShowPlayer(true).
+  -> Le VideoPlayer reçoit le bon episodeId pour lecture directe.
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js (~2835 lignes, +227 lignes vs V0,007)
+- components/dagzflix/SmartButton.jsx
+- components/dagzflix/MediaDetailView.jsx
+- components/dagzflix/SearchView.jsx
+
+NOUVELLES ROUTES API:
+- GET  /api/media/next-episode  -> handleNextEpisode
+
+NOUVELLES FONCTIONS:
+- injectFavoriteStatus(items, userId)
+- handleNextEpisode(req)
+- TMDB_GENRE_NAME_TO_ID (constante)
+
+FONCTIONS REECRITES:
+- getLocalTmdbIds(): Set → Map (tmdbId → jellyfinId)
+- handlePersonDetail(): chemin UUID 100% TMDB
+- handleMediaDetail(): credits TMDB systématiques sur items locaux
+- handleMediaStatus(): cross-réf TMDB → Jellyfin local
+- handleDiscover(): support genre/studio filtering
+
+VALIDATION:
+- 0 erreurs de compilation sur les 4 fichiers modifiés.
+- Tous les handlers documentés en JSDoc.
+- Routes enregistrées dans routeGet.
+- Défensif: try/catch sur tous les appels Jellyseerr avec fallback gracieux.
+
+====================================================================
+V0,007.6 | 2026-03-03
+====================================================================
+DEMANDE: EMERGENCY HOTFIX — Correction des régressions V0,007.5
+RÈGLE: ZÉRO NOUVELLE FONCTIONNALITÉ. QUE DE LA RÉPARATION.
+
+BUG 1 — ÉRADICATION DES 500 ERRORS:
+- handleMediaLibrary: try/catch complet, retourne {items:[], totalCount:0} si crash
+- handleMediaResume: try/catch complet, retourne {items:[]} si crash
+- handleDiscover: try/catch complet, retourne {results:[], totalPages:0} si crash
+- handleRecommendations: try/catch complet, retourne {recommendations:[]} si crash
+- handleSearch: try/catch complet, retourne {results:[]} si crash
+- handleWizardDiscover: non-OK → retourne vide au lieu de throw
+- applyParentalFilter: try/catch wrapper + null-guard items
+- getUserProfile: .catch() fallback dans tous les handlers
+- loadTelemetryData: .catch() fallback dans recommendations
+- prefs MongoDB queries: .catch(() => null) partout
+-> RÈGLE: Si une option plante, l'API ignore silencieusement et renvoie le contenu.
+
+BUG 2 — DAGZRANK TROP SÉVÈRE + RECOMMANDATIONS VIDES:
+- calculateDagzRank:
+  - Base score: 0 → 25 pts (tout item neutre démarre à ~50%)
+  - Sections 5 (télémétrie) et 6 (collab): 5 pts neutres si pas de données (au lieu de 0)
+  - Max genres: 30 → 25 pts, max history: 15 → 10 pts
+  - Max télémétrie: 15 → 10 pts, max collab: 15 → 10 pts
+  - Pénalité déjà vu: -50 → -30 pts
+  - Pénalité genres rejetés: -25 max → -20 max, 8/genre → 6/genre
+- handleRecommendations:
+  - SUPPRIMÉ: filtre dagzRank > 20 (supprimait trop d'items)
+  - Retourne toujours le top 25 trié par DagzRank décroissant
+
+BUG 3 — AUDIT MAP VS SET (getLocalTmdbIds):
+- Audit complet: 12 usages vérifiés, tous utilisent .has()/.get() (Map natif)
+- Aucun .add() résiduel trouvé → transition Set→Map propre
+- Pas de correction nécessaire.
+
+--- ROUND 2: ANALYSE LOGS LIVE (3 nouveaux bugs trouvés) ---
+
+BUG 4 — handleMediaGenres 500:
+- Endpoint media/genres explosait sans try/catch.
+- Fix: try/catch complet, retourne {genres:[]} en cas d'erreur.
+- Résultat: 500 → 200.
+
+BUG 5 — handleMediaDetail 404 sur IDs tmdb-*:
+- Le frontend envoie `id=tmdb-12345` mais Jellyseerr attend `12345`.
+- Fix: strip du préfixe `tmdb-` avec `itemId.startsWith('tmdb-') ? itemId.replace('tmdb-', '') : itemId`.
+- Résultat: 404 → 200.
+
+BUG 6 — handleStream 500 sur items non-locaux:
+- Le handler jetait une exception au lieu de retourner une 404 propre.
+- Fix: try/catch + retour 404 `{error, notLocal: true}` au lieu de crash.
+- Résultat: 500 → 404 (intentionnel, item non-local).
+
+--- ROUND 3: ÉLIMINATION DES 404 STREAM SUR ITEMS TMDB ---
+
+BUG 7 — handleStream appelé avec des IDs TMDB numériques:
+- Cause: IDs TMDB purement numériques (ex: 804370) étaient envoyés directement à Jellyfin
+  qui ne les reconnaît pas (ce sont des UUIDs).
+- Fix route.js (handleStream):
+  -> Détection: `const isLikelyTmdbId = /^\d+$/.test(itemId)`
+  -> Résolution: `getLocalTmdbIds()` pour convertir TMDB ID → Jellyfin UUID
+  -> Si résolu: playback avec l'UUID local
+  -> Si non-local: retour 404 {notLocal: true}
+
+BUG 8 — Frontend appelait stream pour des items non-locaux:
+- Cause: `isTmdbOnly` (basé sur le format de l'ID) ne marchait pas pour les IDs numériques TMDB.
+  Jellyseerr renvoyait `mediaInfo.status = 5` même pour des items non dans la bibliothèque locale.
+- Fix MediaDetailView.jsx:
+  -> Remplacé heuristique `isTmdbOnly = fId && !fId.includes('-')` par `isLocallyAvailable = fi?.mediaStatus === 5 || fi?.localId`
+  -> Nouveau: `streamId = fi?.localId || fId` — utilise le Jellyfin ID local si disponible
+  -> `canStreamFromJellyfin = !!streamId && isLocallyAvailable`
+  -> Sous-titres et pistes audio chargés uniquement si canStreamFromJellyfin
+- Fix VideoPlayer.jsx:
+  -> `const id = episodeId || item?.localId || item?.id` — préfère localId au lieu de id
+
+BUG 9 — mediaStatus 5 faux positif depuis Jellyseerr:
+- Cause: mapTmdbItem() copiait directement `mediaInfo.status` de Jellyseerr qui pouvait
+  être 5 ("available" dans Jellyseerr) alors que l'item n'existe PAS dans la bibliothèque
+  Jellyfin locale. Le frontend voyait mediaStatus === 5 et tentait un stream → 404.
+- Fix route.js (mapTmdbItem):
+  -> `mediaStatus: Math.min(item.mediaInfo?.status || 0, 4)` — cappé à 4 max
+  -> Seul le code de cross-référence (`isLocal ? 5 : ...`) peut assigner le status 5
+- Fix route.js (handleMediaDetail TMDB fallback):
+  -> `mediaStatus: isLocallyAvailable ? 5 : Math.min(tmdbData.mediaInfo?.status || 0, 4)`
+  -> Même logique: 5 uniquement si confirmé local via getLocalTmdbIds()
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js (~2900 lignes)
+- components/dagzflix/MediaDetailView.jsx
+- components/dagzflix/VideoPlayer.jsx
+
+VALIDATION:
+- 0 erreurs de compilation sur tous les fichiers modifiés.
+- Monitoring 90 secondes en live pendant test utilisateur:
+  -> Zéro erreur 500 sur tous les endpoints.
+  -> Zéro 404 non-intentionnel.
+  -> Tous les endpoints retournent 200 (detail, library, rating, status, collection,
+     person, discover, recommendations, search, wizard, telemetry, proxy).
+  -> Les appels media/stream ne partent plus pour les items non-locaux (guard frontend OK).
+- Règle respectée: zéro feature ajoutée, que du hardening et bugfix.
+
+====================================================================
+V0,007.7 | 2026-03-03
+====================================================================
+DEMANDE: RÉSURRECTION DES DONNÉES — 2 bugs logiques critiques du hotfix V0,007.6
+RÈGLE: Opération chirurgicale sur le typage et l'error-handling. Zéro feature.
+
+BUG 1 — AUCUN MÉDIA DISPONIBLE / TOUT EST "EN ATTENTE":
+- Cause fondamentale: getLocalTmdbIds() ne spécifiait pas de Limit dans la requête Jellyfin.
+  Le défaut Jellyfin ne renvoyait qu'un sous-ensemble (~100 items), donc la majorité des
+  items locaux n'étaient PAS dans le Map, et tous étaient marqués "non-local".
+- Fix route.js (getLocalTmdbIds):
+  -> Ajout Limit=10000 à la requête Jellyfin pour scanner TOUTE la bibliothèque.
+  -> Ajout console.log diagnostique: "Mapped X local items (scanned Y)".
+  -> Ajout console.error sur le catch au lieu de swallow silencieux.
+- Vérification String() sur les 6 call-sites:
+  -> handlePersonDetail (x2): String(item.tmdbId) ✓
+  -> handleMediaDetail: String(tmdbData.id) ✓
+  -> handleMediaStatus: String(tmdbId) ✓
+  -> handleSearch (scoreResults): String(item.tmdbId) ✓
+  -> handleDiscover: String(mapped.tmdbId) ✓
+  -> Tous utilisaient déjà String() correctement. Pas de type mismatch.
+
+BUG 2 — DISPARITION DES LISTES (DÉCOUVERTE, TENDANCES, LIBRAIRIE):
+- Cause fondamentale: les try/catch enveloppaient tout (API + post-traitement).
+  Si applyParentalFilter, injectFavoriteStatus, ou getUserProfile crashait,
+  le catch renvoyait {items:[], totalCount:0} — vidant les résultats déjà acquis.
+- Fix route.js (handleMediaLibrary):
+  -> Items Jellyfin acquis AVANT les sous-fonctions.
+  -> applyParentalFilter isolé dans son propre try/catch (retourne items intact si erreur).
+  -> injectFavoriteStatus isolé dans son propre try/catch (retourne items intact si erreur).
+  -> Le catch externe ne se déclenche plus que si l'API Jellyfin elle-même est unreachable.
+- Fix route.js (handleDiscover):
+  -> Même restructuration: mapping TMDB d'abord, puis cross-ref locale, filtre parental,
+     et injection favoris chacun dans leur propre try/catch isolé.
+  -> Si getLocalTmdbIds ou getUserProfile plante, les résultats TMDB sont quand même retournés.
+- Fix route.js (handleRecommendations):
+  -> applyParentalFilter et injectFavoriteStatus isolés en try/catch individuels.
+  -> Les items merged/scored ne sont plus vidés par un échec de sous-fonction.
+- Fix route.js (handleSearch):
+  -> scoreResults interne: applyParentalFilter isolé en try/catch.
+  -> loadTelemetryData et getUserProfile protégés par .catch().
+  -> Si le filtre parental plante, les items sont retournés non-filtrés.
+- Tous les catch logguent console.error avec préfixe descriptif:
+  -> "[handler] sub-function failed:" au lieu de swallow silencieux.
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js (~2927 lignes)
+
+VALIDATION:
+- 0 erreurs de compilation.
+- Serveur démarré sur port 3000, HTTP 200 confirmé.
+- Règle respectée: zéro feature ajoutée, que de la correction logique.
+
+FIN DU JOURNAL

@@ -1,0 +1,15 @@
+services:
+  dagzflix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dagzflix_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # N'oublie pas de mettre tes vraies URL dans ce fichier ou dans un .env
+      - MONGO_URL=mongodb://192.168.1.232:27017
+      - DB_NAME=dagzflix
+      - APP_ORIGIN=http://192.168.1.232:3000

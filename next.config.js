@@ -1,5 +1,4 @@
 const nextConfig = {
-  reactStrictMode: false, // Avoid double-mount API calls in dev
   output: 'standalone',
   images: {
     unoptimized: true,

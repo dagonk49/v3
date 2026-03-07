@@ -2251,6 +2251,34 @@ async function handleStream(req) {
     }
   }
 
+  // V0.010 — Safety: if the ID is a Series, auto-resolve to next episode
+  try {
+    const itemCheck = await fetch(
+      `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${itemId}`,
+      { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(10000) }
+    );
+    if (itemCheck.ok) {
+      const itemData = await itemCheck.json();
+      if (itemData.Type === 'Series') {
+        console.log(`[handleStream] ID ${itemId} is a Series — resolving to next episode`);
+        // Re-use handleNextEpisode logic inline
+        const nextUrl = new URL(req.url);
+        nextUrl.searchParams.set('seriesId', itemId);
+        const fakeReq = new Request(nextUrl, { headers: req.headers });
+        const nextRes = await handleNextEpisode(fakeReq);
+        const nextData = await nextRes.json();
+        if (nextData.episodeId) {
+          itemId = nextData.episodeId;
+          console.log(`[handleStream] Resolved series to episode: ${itemId}`);
+        } else {
+          return jsonResponse({ error: 'Aucun épisode disponible pour cette série' }, 404);
+        }
+      }
+    }
+  } catch (checkErr) {
+    console.warn('[handleStream] Series check failed, proceeding with original ID:', checkErr.message);
+  }
+
   const res = await fetch(
     `${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`,
     {
@@ -2267,18 +2295,20 @@ async function handleStream(req) {
             {
               Container: 'ts',
               Type: 'Video',
-              VideoCodec: 'h264,hevc',
-              AudioCodec: 'aac,mp3',
+              VideoCodec: 'h264,hevc,av1',
+              AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
               Context: 'Streaming',
               Protocol: 'hls',
-              MaxAudioChannels: '2',
               BreakOnNonKeyFrames: true,
+              EnableSubtitlesInManifest: true,
             },
           ],
           SubtitleProfiles: [
             { Format: 'vtt', Method: 'External' },
             { Format: 'srt', Method: 'External' },
             { Format: 'ass', Method: 'External' },
+            { Format: 'ssa', Method: 'External' },
+            { Format: 'sub', Method: 'External' },
           ],
         },
       }),
@@ -2292,7 +2322,22 @@ async function handleStream(req) {
   const playSessionId = pb.PlaySessionId || uuidv4();
   const streams = mediaSource?.MediaStreams || [];
 
-  const hlsCompatUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?api_key=${session.jellyfinToken}&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&VideoCodec=h264&AudioCodec=aac&TranscodingMaxAudioChannels=2&SegmentContainer=ts`;
+  // V0.010 Mission 3 — HLS optimisé : adaptive bitrate, toutes pistes audio/sous-titres
+  const audioStreamIndexes = streams.filter(s => s.Type === 'Audio').map(s => s.Index).join(',');
+  const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
+  const hlsParams = new URLSearchParams({
+    api_key: session.jellyfinToken,
+    MediaSourceId: mediaSource?.Id || '',
+    PlaySessionId: playSessionId,
+    VideoCodec: 'h264,hevc,av1',
+    AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
+    SegmentContainer: 'ts',
+    EnableAdaptiveBitrateStreaming: 'true',
+    SubtitleMethod: 'Hls',
+  });
+  if (audioStreamIndexes) hlsParams.set('AudioStreamIndex', audioStreamIndexes.split(',')[0]);
+  if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
+  const hlsCompatUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
   const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
   const streamUrl = hlsCompatUrl;
 
@@ -3047,6 +3092,56 @@ async function handleAdminTelemetry(req) {
 }
 
 /**
+ * GET /api/admin/user-stats?userId={userId}
+ * V0.010 Mission 4 — Renvoie les statistiques détaillées d'un utilisateur :
+ * temps de visionnage total, genres favoris, activité récente, nombre de favoris.
+ * @param {Request} req
+ * @returns {Object} {totalWatchSeconds, favoriteGenres[], recentActivity[], favoritesCount}
+ */
+async function handleAdminUserStats(req) {
+  const auth = await requireAdmin(req);
+  if (auth.error) return auth.error;
+
+  const userId = new URL(req.url).searchParams.get('userId');
+  if (!userId) return jsonResponse({ error: 'userId requis' }, 400);
+
+  try {
+    const db = await getDb();
+
+    // Total watch time (seconds) from telemetry
+    const watchDocs = await db.collection('telemetry')
+      .find({ userId, action: 'watch' })
+      .project({ value: 1 })
+      .toArray();
+    const totalWatchSeconds = watchDocs.reduce((sum, d) => sum + (d.value || 0), 0);
+
+    // Favorite genres from preferences
+    const prefs = await db.collection('preferences').findOne({ userId });
+    const favoriteGenres = prefs?.genres || [];
+
+    // Recent activity (last 30 events for this user)
+    const recentActivity = await db.collection('telemetry')
+      .find({ userId })
+      .sort({ timestamp: -1 })
+      .limit(30)
+      .project({ action: 1, itemId: 1, value: 1, timestamp: 1 })
+      .toArray();
+
+    // Favorites count
+    const favoritesCount = await db.collection('favorites').countDocuments({ userId });
+
+    return jsonResponse({
+      totalWatchSeconds,
+      favoriteGenres,
+      recentActivity,
+      favoritesCount,
+    });
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 500);
+  }
+}
+
+/**
  * Extrait les segments de chemin depuis l'URL de la requête.
  * Ex: /api/media/detail → ['media', 'detail']
  * @param {Request} req
@@ -3093,6 +3188,7 @@ async function routeGet(parts, req) {
 
   if (route === 'admin/users') return handleAdminUsers(req);
   if (route === 'admin/telemetry') return handleAdminTelemetry(req);
+  if (route === 'admin/user-stats') return handleAdminUserStats(req);
 
   if (route === 'proxy/image') return handleProxyImage(req);
   if (route === 'proxy/tmdb') return handleProxyTmdb(req);

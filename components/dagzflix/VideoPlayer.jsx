@@ -8,12 +8,18 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatTime } from '@/lib/constants';
+import Hls from 'hls.js';
 
+/**
+ * V0.010 — VideoPlayer powered by hls.js
+ * - Reliable HLS playback via hls.js (audio always transcoded to AAC by Jellyfin)
+ * - Native Safari HLS fallback
+ * - Direct Play fallback if HLS fails entirely
+ * - Custom DagzFlix overlay controls
+ * - Cross-sync progression (resume + report every 10 s)
+ */
 export function VideoPlayer({ item, episodeId, onClose }) {
-  const [streamUrl, setStreamUrl] = useState('');
-  const [fallbackStreamUrl, setFallbackStreamUrl] = useState('');
-  const [playSessionId, setPlaySessionId] = useState('');
-  const [mediaSourceId, setMediaSourceId] = useState('');
+  const [streamData, setStreamData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -22,136 +28,289 @@ export function VideoPlayer({ item, episodeId, onClose }) {
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [subtitles, setSubtitles] = useState([]);
-  const [audioTracks, setAudioTracks] = useState([]);
   const [activeSub, setActiveSub] = useState(-1);
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [buffered, setBuffered] = useState(0);
+  const [hlsAudioTracks, setHlsAudioTracks] = useState([]);
+  const [activeAudioTrack, setActiveAudioTrack] = useState(0);
+
   const videoRef = useRef(null);
+  const hlsRef = useRef(null);
   const ctrlTimer = useRef(null);
   const progressRef = useRef(null);
+  const progressIntervalRef = useRef(null);
 
+  // ── Fetch stream metadata ──
   useEffect(() => {
-    fetchStream();
-    return () => { if (ctrlTimer.current) clearTimeout(ctrlTimer.current); };
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const id = episodeId || item?.localId || item?.id;
+        if (!id) { setError('ID manquant'); setLoading(false); return; }
+        const r = await api(`media/stream?id=${id}`);
+        if (cancelled) return;
+        if (r.streamUrl) {
+          setStreamData(r);
+          if (r.duration) setDuration(r.duration);
+        } else {
+          setError(r.error || 'Stream indisponible');
+        }
+      } catch (e) { if (!cancelled) setError(e.message); }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [episodeId, item?.localId, item?.id]);
 
-  const fetchStream = async () => {
-    try {
-      // V7.6: Prefer localId for streaming (resolved Jellyfin ID), fallback to item.id
-      const id = episodeId || item?.localId || item?.id;
-      if (!id) { setError('ID manquant'); setLoading(false); return; }
-      const r = await api(`media/stream?id=${id}`);
-      if (r.streamUrl) {
-        setStreamUrl(r.streamUrl);
-        setFallbackStreamUrl(r.fallbackStreamUrl || '');
-        setSubtitles(r.subtitles || []);
-        setAudioTracks(r.audioTracks || []);
-        setPlaySessionId(r.playSessionId || '');
-        setMediaSourceId(r.mediaSourceId || id);
-        if (r.duration) setDuration(r.duration);
-      } else {
-        setError(r.error || 'Stream indisponible');
+  // ── Attach hls.js or native HLS once we have stream data ──
+  useEffect(() => {
+    if (!streamData || !videoRef.current) return;
+    const video = videoRef.current;
+
+    const resumeSec = item?.playbackPositionTicks
+      ? Math.floor(item.playbackPositionTicks / 10_000_000)
+      : 0;
+
+    // Try hls.js first (Chrome, Firefox, Edge)
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        startLevel: -1,  // auto quality
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(streamData.streamUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (resumeSec > 0) video.currentTime = resumeSec;
+        video.play().catch(() => {});
+      });
+
+      // Expose HLS audio tracks for the track switcher
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+        setHlsAudioTracks(hls.audioTracks || []);
+        setActiveAudioTrack(hls.audioTrack);
+      });
+
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+        setActiveAudioTrack(data.id);
+      });
+
+      // Fatal error → try Direct Play fallback
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          console.warn('[HLS] fatal error, trying direct play fallback', data.type);
+          hls.destroy();
+          hlsRef.current = null;
+          if (streamData.fallbackStreamUrl) {
+            video.src = streamData.fallbackStreamUrl;
+            if (resumeSec > 0) video.currentTime = resumeSec;
+            video.play().catch(() => {});
+          } else {
+            setError('Lecture impossible pour cette source.');
+          }
+        }
+      });
+
+    // Safari native HLS
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = streamData.streamUrl;
+      video.addEventListener('loadedmetadata', () => {
+        if (resumeSec > 0) video.currentTime = resumeSec;
+        video.play().catch(() => {});
+      }, { once: true });
+      video.addEventListener('error', () => {
+        if (streamData.fallbackStreamUrl) {
+          video.src = streamData.fallbackStreamUrl;
+          if (resumeSec > 0) video.currentTime = resumeSec;
+          video.play().catch(() => {});
+        } else {
+          setError('Lecture impossible pour cette source.');
+        }
+      }, { once: true });
+
+    // No HLS support at all → Direct Play
+    } else {
+      video.src = streamData.fallbackStreamUrl || streamData.streamUrl;
+      video.addEventListener('loadedmetadata', () => {
+        if (resumeSec > 0) video.currentTime = resumeSec;
+        video.play().catch(() => {});
+      }, { once: true });
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
-    } catch (e) { setError(e.message); }
-    setLoading(false);
-  };
+    };
+  }, [streamData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const resetTimer = useCallback(() => {
-    setShowControls(true);
-    if (ctrlTimer.current) clearTimeout(ctrlTimer.current);
-    ctrlTimer.current = setTimeout(() => { if (isPlaying) setShowControls(false); }, 4000);
-  }, [isPlaying]);
-
-  const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (videoRef.current.paused) { videoRef.current.play(); setIsPlaying(true); }
-    else { videoRef.current.pause(); setIsPlaying(false); }
-    resetTimer();
-  };
-
-  const skip = (s) => { if (!videoRef.current) return; videoRef.current.currentTime = Math.max(0, Math.min(videoRef.current.duration || 0, videoRef.current.currentTime + s)); resetTimer(); };
-  const handleVol = (v) => { if (!videoRef.current) return; const val = parseFloat(v); setVolume(val); videoRef.current.volume = val; setIsMuted(val === 0); };
-  const toggleMute = () => { if (!videoRef.current) return; if (isMuted) { videoRef.current.muted = false; videoRef.current.volume = volume || 0.5; setIsMuted(false); } else { videoRef.current.muted = true; setIsMuted(true); } };
-  const handleSeek = (e) => { if (!videoRef.current || !progressRef.current) return; const rect = progressRef.current.getBoundingClientRect(); const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)); videoRef.current.currentTime = pct * (videoRef.current.duration || 0); resetTimer(); };
-  const toggleFS = () => { const el = videoRef.current?.parentElement?.parentElement; if (document.fullscreenElement) document.exitFullscreen(); else el?.requestFullscreen?.(); };
-  const handleSub = (idx) => { setActiveSub(idx); if (!videoRef.current) return; const tracks = videoRef.current.textTracks; for (let i = 0; i < tracks.length; i++) { tracks[i].mode = i === idx ? 'showing' : 'hidden'; } setShowSubMenu(false); };
-  const onTimeUpdate = () => { if (!videoRef.current) return; setCurrentTime(videoRef.current.currentTime); if (videoRef.current.duration) setDuration(videoRef.current.duration); if (videoRef.current.buffered.length > 0) setBuffered(videoRef.current.buffered.end(videoRef.current.buffered.length - 1)); };
-
+  // ── Progress reporting ──
   const reportProgress = useCallback(async ({ isPaused = false, isStopped = false } = {}) => {
     try {
       const video = videoRef.current;
       const itemId = episodeId || item?.id;
-      if (!video || !itemId) return;
-      const positionTicks = Math.max(0, Math.floor(video.currentTime * 10000000));
+      if (!video || !itemId || !streamData) return;
+      const positionTicks = Math.max(0, Math.floor(video.currentTime * 10_000_000));
       await api('media/progress', {
         method: 'POST',
         body: JSON.stringify({
           itemId,
-          mediaSourceId,
-          playSessionId,
+          mediaSourceId: streamData.mediaSourceId || itemId,
+          playSessionId: streamData.playSessionId || '',
           positionTicks,
           isPaused,
           isStopped,
         }),
       });
-    } catch (_) {
-      // Silently ignore progress ping failures to avoid disrupting playback UI
-    }
-  }, [episodeId, item?.id, mediaSourceId, playSessionId]);
+    } catch (_) { /* fire-and-forget */ }
+  }, [episodeId, item?.id, streamData]);
 
+  // ── 10 s progress interval + events ──
   useEffect(() => {
-    if (!streamUrl) return;
-    const id = setInterval(() => {
-      reportProgress({ isPaused: !isPlaying, isStopped: false });
-    }, 10000);
+    if (!streamData) return;
+
+    progressIntervalRef.current = setInterval(() => {
+      const v = videoRef.current;
+      if (v && !v.paused) reportProgress({ isPaused: false });
+    }, 10_000);
 
     return () => {
-      clearInterval(id);
+      clearInterval(progressIntervalRef.current);
       reportProgress({ isPaused: true, isStopped: true });
     };
-  }, [streamUrl, isPlaying, reportProgress]);
+  }, [streamData, reportProgress]);
 
-  const handleVideoError = () => {
-    if (fallbackStreamUrl && fallbackStreamUrl !== streamUrl) {
-      setStreamUrl(fallbackStreamUrl);
-      setError('');
-      return;
+  // ── Cleanup on unmount ──
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (ctrlTimer.current) clearTimeout(ctrlTimer.current);
+    };
+  }, []);
+
+  // ── Video element event handlers ──
+  const onTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    setCurrentTime(v.currentTime);
+    if (v.duration && isFinite(v.duration)) setDuration(v.duration);
+    if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+  };
+
+  // ── Custom controls helpers ──
+  const resetTimer = useCallback(() => {
+    setShowControls(true);
+    if (ctrlTimer.current) clearTimeout(ctrlTimer.current);
+    ctrlTimer.current = setTimeout(() => {
+      const v = videoRef.current;
+      if (v && !v.paused) setShowControls(false);
+    }, 4000);
+  }, []);
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play().catch(() => {}); } else { v.pause(); }
+    resetTimer();
+  };
+
+  const skip = (s) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + s));
+    resetTimer();
+  };
+
+  const handleVol = (val) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const f = parseFloat(val);
+    v.volume = f;
+    setVolume(f);
+    v.muted = f === 0;
+    setIsMuted(f === 0);
+  };
+
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.muted) { v.muted = false; if (v.volume === 0) v.volume = 0.5; setVolume(v.volume); setIsMuted(false); }
+    else { v.muted = true; setIsMuted(true); }
+  };
+
+  const handleSeek = (e) => {
+    const v = videoRef.current;
+    if (!v || !progressRef.current) return;
+    const rect = progressRef.current.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    v.currentTime = pct * (v.duration || 0);
+    resetTimer();
+  };
+
+  const toggleFS = () => {
+    const el = videoRef.current?.parentElement;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else el.requestFullscreen?.();
+  };
+
+  const handleSub = (idx) => {
+    setActiveSub(idx);
+    const v = videoRef.current;
+    if (!v) return;
+    const tracks = v.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      tracks[i].mode = i === idx ? 'showing' : 'hidden';
     }
-    setError('Lecture impossible pour cette source.');
+    setShowSubMenu(false);
+  };
+
+  const handleAudioTrack = (idx) => {
+    const hls = hlsRef.current;
+    if (hls && hls.audioTracks?.length > 0) {
+      hls.audioTrack = idx;
+    }
+    setShowAudioMenu(false);
   };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const buffPct = duration > 0 ? (buffered / duration) * 100 : 0;
 
+  // Use hls.js audio tracks if available, otherwise fall back to API metadata
+  const subtitlesMeta = streamData?.subtitles || [];
+  const audioTracksMeta = hlsAudioTracks.length > 0
+    ? hlsAudioTracks.map((t, i) => ({ index: i, displayTitle: t.name || t.lang || `Audio ${i + 1}`, channels: 0, isDefault: i === activeAudioTrack }))
+    : (streamData?.audioTracks || []);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} data-testid="video-player" className="fixed inset-0 z-[200] bg-black flex items-center justify-center" onMouseMove={resetTimer}>
       {loading ? (
-        <div className="text-center"><Loader2 className="w-12 h-12 animate-spin text-red-600 mx-auto mb-4" /><p className="text-gray-400">Chargement Direct Play...</p></div>
+        <div className="text-center"><Loader2 className="w-12 h-12 animate-spin text-red-600 mx-auto mb-4" /><p className="text-gray-400">Chargement du lecteur…</p></div>
       ) : error ? (
         <div className="text-center max-w-md"><AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" /><h3 className="text-xl font-bold mb-2">Lecture impossible</h3><p className="text-gray-400 mb-6">{error}</p><Button onClick={onClose} className="bg-white/10 hover:bg-white/20 rounded-xl">Fermer</Button></div>
       ) : (
         <div className="w-full h-full relative">
-          <video ref={videoRef} src={streamUrl} className="w-full h-full object-contain" autoPlay
+          <video
+            ref={videoRef}
+            className="w-full h-full object-contain"
+            playsInline
             onTimeUpdate={onTimeUpdate}
-            onPlay={() => {
-              if (videoRef.current) {
-                videoRef.current.muted = false;
-                if (videoRef.current.volume === 0) videoRef.current.volume = 1;
-              }
-              setIsPlaying(true);
-              setIsMuted(false);
-              reportProgress({ isPaused: false, isStopped: false });
-            }}
-            onPause={() => { setIsPlaying(false); setShowControls(true); reportProgress({ isPaused: true, isStopped: false }); }}
-            onLoadedMetadata={(e) => setDuration(e.target.duration)}
-            onError={handleVideoError}
+            onPlay={() => { setIsPlaying(true); reportProgress({ isPaused: false }); }}
+            onPause={() => { setIsPlaying(false); setShowControls(true); reportProgress({ isPaused: true }); }}
+            onLoadedMetadata={(e) => { if (e.target.duration && isFinite(e.target.duration)) setDuration(e.target.duration); }}
             onClick={togglePlay}
           >
-            {subtitles.map((s, i) => <track key={i} kind="subtitles" src={s.url} srcLang={s.language} label={s.displayTitle} />)}
+            {subtitlesMeta.map((s, i) => <track key={i} kind="subtitles" src={s.url} srcLang={s.language} label={s.displayTitle} />)}
           </video>
-          <div className={`absolute inset-0 transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+
+          {/* ── Custom DagzFlix overlay controls ── */}
+          <div className={`absolute inset-0 transition-opacity duration-500 z-10 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             {/* Top bar */}
             <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-6 flex items-center justify-between">
               <button data-testid="player-close" onClick={onClose} className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-xl flex items-center justify-center hover:bg-white/20"><ChevronLeft className="w-6 h-6" /></button>
@@ -186,23 +345,23 @@ export function VideoPlayer({ item, episodeId, onClose }) {
                       <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={e => handleVol(e.target.value)} className="w-24 h-1 appearance-none bg-white/20 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full" />
                     </div>
                   </div>
-                  {subtitles.length > 0 && (
+                  {subtitlesMeta.length > 0 && (
                     <div className="relative">
                       <button data-testid="player-subs-toggle" onClick={() => { setShowSubMenu(!showSubMenu); setShowAudioMenu(false); }} className={`p-2 rounded-xl transition-all ${activeSub >= 0 ? 'bg-white/20 text-white' : 'hover:bg-white/10 text-gray-400'}`}><Subtitles className="w-5 h-5" /></button>
                       {showSubMenu && (
                         <div className="absolute bottom-12 right-0 glass-strong rounded-2xl p-2 min-w-[200px] max-h-[300px] overflow-y-auto">
                           <button onClick={() => handleSub(-1)} className={`w-full text-left px-3 py-2 rounded-xl text-sm ${activeSub === -1 ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}>Désactiver</button>
-                          {subtitles.map((s, i) => <button key={i} onClick={() => handleSub(i)} className={`w-full text-left px-3 py-2 rounded-xl text-sm ${activeSub === i ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{s.displayTitle}</button>)}
+                          {subtitlesMeta.map((s, i) => <button key={i} onClick={() => handleSub(i)} className={`w-full text-left px-3 py-2 rounded-xl text-sm ${activeSub === i ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{s.displayTitle}</button>)}
                         </div>
                       )}
                     </div>
                   )}
-                  {audioTracks.length > 1 && (
+                  {audioTracksMeta.length > 1 && (
                     <div className="relative">
                       <button onClick={() => { setShowAudioMenu(!showAudioMenu); setShowSubMenu(false); }} className="p-2 rounded-xl hover:bg-white/10 text-gray-400"><AudioLines className="w-5 h-5" /></button>
                       {showAudioMenu && (
                         <div className="absolute bottom-12 right-0 glass-strong rounded-2xl p-2 min-w-[200px]">
-                          {audioTracks.map((a, i) => <button key={i} className={`w-full text-left px-3 py-2 rounded-xl text-sm ${a.isDefault ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{a.displayTitle} ({a.channels}ch)</button>)}
+                          {audioTracksMeta.map((a, i) => <button key={i} onClick={() => handleAudioTrack(a.index ?? i)} className={`w-full text-left px-3 py-2 rounded-xl text-sm ${a.isDefault ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}>{a.displayTitle}{a.channels ? ` (${a.channels}ch)` : ''}</button>)}
                         </div>
                       )}
                     </div>

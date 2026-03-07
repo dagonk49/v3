@@ -37,10 +37,27 @@ export function SmartButton({ item, onPlay }) {
     } catch { setStatus('unknown'); }
   };
 
-  const handlePlay = () => {
-    if (item.type === 'Series' && nextEp?.episodeId) {
-      // Smart Play: launch next episode directly
-      onPlay(item, nextEp.episodeId);
+  const handlePlay = async () => {
+    if (item.type === 'Series') {
+      // For series, always need an episode ID
+      if (nextEp?.episodeId) {
+        onPlay(item, nextEp.episodeId);
+      } else {
+        // Try to fetch next episode on-demand if not pre-loaded
+        try {
+          const epRes = await api(`media/next-episode?seriesId=${item.id}`);
+          if (epRes.episodeId) {
+            setNextEp(epRes);
+            onPlay(item, epRes.episodeId);
+          } else {
+            // Fallback: let backend handleStream resolve it
+            onPlay(item);
+          }
+        } catch (_) {
+          // Last resort: backend will auto-resolve series → episode
+          onPlay(item);
+        }
+      }
     } else {
       onPlay(item);
     }

@@ -5,7 +5,7 @@ Contexte: Stabilisation app Next.js + BFF API Jellyfin/Jellyseerr + corrections 
 ====================================================================
 SUIVI DE VERSION (OBLIGATOIRE)
 ====================================================================
-Version courante: V0,007.7
+Version courante: V0,011
 Format: V0,001 -> V0,002 -> V0,003 ...
 
 Règle de gestion:
@@ -929,5 +929,120 @@ VALIDATION:
 - 0 erreurs de compilation.
 - Serveur démarré sur port 3000, HTTP 200 confirmé.
 - Règle respectée: zéro feature ajoutée, que de la correction logique.
+
+====================================================================
+V0,007.8 — SESSION RESURRECTION (2026-03-03)
+====================================================================
+DEMANDE: Le token Jellyfin devenait stale (expiré ou invalidé côté serveur) sans que le frontend le détecte. L'utilisateur restait "connecté" mais toutes les requêtes échouaient silencieusement.
+
+MODIFICATIONS:
+- getSession() : ajout validation token Jellyfin avec ping léger + cache 5 min. Si Jellyfin retourne 401 → session MongoDB supprimée.
+- mapJellyfinItem() : mediaStatus=5 systématique + ajout tmdbId/localId/providerIds.
+- handleMediaLibrary / handleMediaResume : propagation 401 Jellyfin au lieu de retourner 200 vide.
+- Frontend : auto-logout sur token expiré via événement dagzflix:session-expired.
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js
+- lib/api.js
+- lib/auth-context.js
+
+====================================================================
+V0,008.1 — STABILISATION (2026-03-04)
+====================================================================
+DEMANDE: 4 missions de bugfix post-stabilisation.
+
+MODIFICATIONS:
+- Fix process/browser.js ENOENT : ajout dépendance `process` via yarn add process.
+- Fix stream 404 sur séries : backend auto-resolve Series→Episode + frontend SmartButton on-demand fetch.
+- Fix appels API dupliqués : reactStrictMode: false dans next.config.js.
+- SmartButton : détection du premier épisode pour les séries.
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js
+- components/dagzflix/SmartButton.jsx
+- next.config.js
+- package.json
+
+====================================================================
+V0,009 — AUDIT SECURITE (2026-03-05)
+====================================================================
+DEMANDE: 7 missions d'audit sécurité du backend.
+
+MODIFICATIONS:
+- Validation d'entrée Zod sur endpoints critiques (media/favorite, wizard/feedback, media/rate).
+- Sanitisation alphanumericId sur tous les IDs utilisateur.
+- Protection CORS renforcée (APP_ORIGIN + validateOrigin()).
+- Proxy image streaming direct (suppression arrayBuffer() — anti-fuite mémoire).
+- requireAdmin() helper centralisé pour les endpoints admin.
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js
+
+====================================================================
+V0,010 — FEATURE UPDATE (2026-03-06)
+====================================================================
+DEMANDE: 4 missions d'ajout/réécriture de features.
+
+MODIFICATIONS:
+- VideoPlayer réécrit avec hls.js (remplacement de video.js).
+- Cross-sync SmartButton ↔ MediaDetailView (état partagé lecture/favoris).
+- Backend HLS : profil transcodage complet (h264/hevc/av1, sous-titres HLS, pistes audio multiples).
+- Dashboard Admin enrichi (GET /api/admin/user-stats, GET /api/admin/telemetry).
+
+FICHIERS MODIFIES:
+- app/api/[[...path]]/route.js
+- components/dagzflix/VideoPlayer.jsx
+- components/dagzflix/SmartButton.jsx
+- components/dagzflix/MediaDetailView.jsx
+- app/admin/page.js
+
+====================================================================
+V0,011 — LE GRAND REFACTORING (2026-03-07)
+====================================================================
+DEMANDE: Décomposition du God Object route.js (3275 lignes, 38 handlers + 25 fonctions utilitaires) en architecture modulaire. RÈGLE D'OR: zéro ajout/suppression de feature, contrat API 100% identique (25 GET + 13 POST + OPTIONS).
+
+MODIFICATIONS:
+
+PHASE 1 — EXTRACTION DES LIBRAIRIES (lib/):
+- lib/db.js : MongoDB connection pool (singleton global._mongoClientPromise) + schémas Zod (FavoriteToggleSchema, WizardFeedbackSchema, MediaRateSchema).
+- lib/api-utils.js : ALLOWED_ORIGIN, validateOrigin(), jsonResponse(), cors(), getConfig(). Tout le boilerplate HTTP centralisé.
+- lib/auth-helpers.js : getSession() avec cache validation token 5 min, requireAdmin(), jellyfinAuthHeader(). Middleware auth réutilisable.
+- lib/media-mappers.js : mapTmdbItem, mapJellyfinItem, resolveGenres, extractTmdbId, normalizeContentId, contentIdFromItem, fetchJellyfinItemById, resolveTmdbId, getLocalTmdbIds (cache 5 min), getUserProfile, injectFavoriteStatus, matchesRuntimeLoose, TMDB_GENRE_ID_TO_NAME, TMDB_GENRE_NAME_TO_ID. Toute la logique de transformation de données.
+- lib/dagzrank.js : calculateDagzRank (V3, 7 couches de scoring), loadTelemetryData, applyParentalFilter, CHILD_BLOCKED_GENRES. Algorithme de classement propriétaire.
+
+PHASE 2 — EXTRACTION DES CONTROLLERS (controllers/):
+- controllers/auth.controller.js : 6 handlers — handleSetupCheck, handleSetupTest, handleSetupSave, handleAuthLogin, handleAuthLogout, handleAuthSession.
+- controllers/admin.controller.js : 4 handlers — handleAdminUsers, handleAdminUsersUpdate, handleAdminTelemetry, handleAdminUserStats.
+- controllers/media.controller.js : 16 handlers — handleMediaDetail, handleMediaStream, handleMediaStatus, handleMediaNextEpisode, handlePersonDetail, handleMediaLibrary, handleGenres, handleSeasons, handleEpisodes, handleTrailer, handleCollection, handleMediaRequest, handleProgress, handleMediaResume, handleProxyImage, handleProxyTmdb.
+- controllers/discovery.controller.js : 4 handlers — handleSearch, handleDiscover, handleRecommendations, handleWizardDiscover.
+- controllers/user.controller.js : 8 handlers — handleMediaFavoriteToggle, handleFavoritesGet, handlePreferencesGet, handlePreferencesSave, handleTelemetryClick, handleMediaRate, handleRatingGet, handleWizardFeedback.
+
+PHASE 3 — RÉÉCRITURE DE ROUTE.JS (AIGUILLEUR):
+- route.js réduit à ~170 lignes : imports + getPathParts() + routeGet() + routePost() + exports GET/POST/OPTIONS.
+- Zéro logique métier dans route.js — pure table de routage.
+- routeGet() : switch sur pathParts pour les 25 routes GET.
+- routePost() : switch sur pathParts pour les 13 routes POST.
+- OPTIONS : CORS preflight centralisé.
+
+FICHIERS CREES:
+- app/api/[[...path]]/lib/db.js
+- app/api/[[...path]]/lib/api-utils.js
+- app/api/[[...path]]/lib/auth-helpers.js
+- app/api/[[...path]]/lib/media-mappers.js
+- app/api/[[...path]]/lib/dagzrank.js
+- app/api/[[...path]]/controllers/auth.controller.js
+- app/api/[[...path]]/controllers/admin.controller.js
+- app/api/[[...path]]/controllers/media.controller.js
+- app/api/[[...path]]/controllers/discovery.controller.js
+- app/api/[[...path]]/controllers/user.controller.js
+
+FICHIERS REMPLACES:
+- app/api/[[...path]]/route.js (3275 lignes → ~170 lignes)
+
+VALIDATION:
+- Build Next.js: ✓ Compiled successfully (19.42s)
+- 0 warnings, 0 erreurs.
+- Architecture: 3275 lignes monolithiques → 11 fichiers modulaires.
+- Contrat API préservé: 25 GET + 13 POST + OPTIONS identiques.
 
 FIN DU JOURNAL

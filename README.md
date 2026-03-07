@@ -10,7 +10,7 @@ DagzFlix est une interface unifiée de streaming et découverte, avec un **BFF A
 
 ## Version du projet
 
-- **Version courante**: **V0,007.7**
+- **Version courante**: **V0,011**
 - **Format**: `V0,001`, `V0,002`, `V0,003`, etc.
 - **Règle de suivi (obligatoire)**:
 	- À chaque requête utilisateur impliquant une action/changement, la version est incrémentée.
@@ -286,12 +286,63 @@ DagzFlix est une interface unifiée de streaming et découverte, avec un **BFF A
 		- Tous les catch logguent `console.error` avec préfixe descriptif au lieu de swallow silencieux.
 	- Fichiers modifiés : `route.js`.
 
+- **V0,007.8** (2026-03-03)
+	- **SESSION RESURRECTION** — Token Jellyfin stale.
+	- `getSession()` : validation du token Jellyfin avec ping léger + cache 5 min. Si Jellyfin 401 → session supprimée.
+	- `mapJellyfinItem()` : mediaStatus 5 systématique + ajout tmdbId/localId/providerIds.
+	- Handlers `handleMediaLibrary`/`handleMediaResume` : propagation du 401 Jellyfin (au lieu de 200 vide).
+	- Frontend auto-logout sur token expiré (`dagzflix:session-expired` event).
+	- Fichiers modifiés: `route.js`, `lib/api.js`, `lib/auth-context.js`.
+
+- **V0,008.1** (2026-03-04)
+	- **Stabilisation** — 4 missions de bugfix.
+	- Fix `process/browser.js` ENOENT (ajout dépendance `process` via `yarn add process`).
+	- Fix stream 404 sur séries (backend auto-resolve Series→Episode + frontend SmartButton on-demand fetch).
+	- Fix appels API dupliqués (`reactStrictMode: false` dans `next.config.js`).
+	- Fichiers modifiés: `route.js`, `SmartButton.jsx`, `next.config.js`, `package.json`.
+
+- **V0,009** (2026-03-05)
+	- **Audit Sécurité** — 7 missions.
+	- Validation d'entrée Zod sur endpoints critiques (`media/favorite`, `wizard/feedback`, `media/rate`).
+	- Sanitisation `alphanumericId` sur tous les IDs utilisateur.
+	- Protection CORS renforcée (`APP_ORIGIN` + `validateOrigin()`).
+	- Proxy image streaming direct (plus de `arrayBuffer()` — anti-fuite mémoire).
+	- `requireAdmin()` helper centralisé.
+	- Fichiers modifiés: `route.js`.
+
+- **V0,010** (2026-03-06)
+	- **Feature Update** — 4 missions.
+	- VideoPlayer réécrit avec hls.js (remplacement video.js).
+	- Cross-sync SmartButton ↔ MediaDetailView (état partagé).
+	- Backend HLS : profil transcodage complet (h264/hevc/av1, sous-titres HLS, pistes audio multiples).
+	- Dashboard Admin enrichi (`GET /api/admin/user-stats`, `GET /api/admin/telemetry`).
+	- Fichiers modifiés: `route.js`, `VideoPlayer.jsx`, `SmartButton.jsx`, `MediaDetailView.jsx`, `app/admin/page.js`.
+
+- **V0,011** (2026-03-07)
+	- **🏗️ LE GRAND REFACTORING** — Décomposition du God Object `route.js` (3275 lignes) en architecture modulaire.
+	- **RÈGLE D'OR** : Zéro ajout/suppression de fonctionnalité. Contrat API 100% identique (25 GET + 13 POST + OPTIONS).
+	- **Architecture créée** :
+		- `lib/db.js` — MongoDB connection pool (singleton `global._mongoClientPromise`) + schémas Zod (`FavoriteToggleSchema`, `WizardFeedbackSchema`, `MediaRateSchema`).
+		- `lib/api-utils.js` — `ALLOWED_ORIGIN`, `validateOrigin()`, `jsonResponse()`, `getConfig()`.
+		- `lib/auth-helpers.js` — `getSession()` (cache validation token 5 min), `requireAdmin()`, `jellyfinAuthHeader()`.
+		- `lib/media-mappers.js` — `mapTmdbItem`, `mapJellyfinItem`, `resolveGenres`, `extractTmdbId`, `normalizeContentId`, `contentIdFromItem`, `fetchJellyfinItemById`, `resolveTmdbId`, `getLocalTmdbIds` (cache 5 min), `getUserProfile`, `injectFavoriteStatus`, `matchesRuntimeLoose`, `TMDB_GENRE_ID_TO_NAME`, `TMDB_GENRE_NAME_TO_ID`.
+		- `lib/dagzrank.js` — `calculateDagzRank` (V3, 7 couches), `loadTelemetryData`, `applyParentalFilter`, `CHILD_BLOCKED_GENRES`.
+		- `controllers/auth.controller.js` — 6 handlers : `handleSetupCheck/Test/Save`, `handleAuthLogin/Logout/Session`.
+		- `controllers/admin.controller.js` — 4 handlers : `handleAdminUsers/UsersUpdate/Telemetry/UserStats`.
+		- `controllers/media.controller.js` — 16 handlers : `handleMediaDetail/Stream/Status/NextEpisode/PersonDetail/MediaLibrary/Genres/Seasons/Episodes/Trailer/Collection/Request/Progress/Resume`, `handleProxyImage/Tmdb`.
+		- `controllers/discovery.controller.js` — 4 handlers : `handleSearch/Discover/Recommendations/WizardDiscover`.
+		- `controllers/user.controller.js` — 8 handlers : `handleMediaFavoriteToggle/FavoritesGet`, `handlePreferencesGet/Save`, `handleTelemetryClick`, `handleMediaRate/RatingGet`, `handleWizardFeedback`.
+		- `route.js` (aiguilleur) — ~170 lignes : imports + `getPathParts()` + `routeGet()` + `routePost()` + `GET`/`POST`/`OPTIONS` exports. Zéro logique métier.
+	- **Résultat** : 3275 lignes monolithiques → 11 fichiers modulaires. Build Next.js validé (`✓ Compiled successfully`).
+	- Fichiers créés: `lib/db.js`, `lib/api-utils.js`, `lib/auth-helpers.js`, `lib/media-mappers.js`, `lib/dagzrank.js`, `controllers/auth.controller.js`, `controllers/admin.controller.js`, `controllers/media.controller.js`, `controllers/discovery.controller.js`, `controllers/user.controller.js`.
+	- Fichiers remplacés: `route.js` (3275 lignes → ~170 lignes).
+
 ---
 
 ## 1) Stack technique
 
 - **Frontend**: Next.js 14 (App Router), React 18, Framer Motion, Tailwind
-- **Backend (BFF)**: route API centralisée dans `app/api/[[...path]]/route.js`
+- **Backend (BFF)**: architecture modulaire dans `app/api/[[...path]]/` (route.js aiguilleur + controllers/ + lib/)
 - **DB**: MongoDB (config, sessions, préférences, users, telemetry, favorites)
 - **Médias**: Jellyfin (lecture locale)
 - **Discovery/Request**: Jellyseerr / TMDB
@@ -313,8 +364,13 @@ DagzFlix est une interface unifiée de streaming et découverte, avec un **BFF A
 - `app/setup/page.js` : Configuration serveurs
 - `app/onboarding/page.js` : Préférences genres
 
-### API BFF
-- `app/api/[[...path]]/route.js` : route API centralisée (~2850 lignes)
+### API BFF (architecture modulaire V0,011)
+- `app/api/[[...path]]/route.js` : aiguilleur pur (~170 lignes, zéro logique métier)
+- `app/api/[[...path]]/controllers/auth.controller.js` : setup + auth (6 handlers)
+- `app/api/[[...path]]/controllers/admin.controller.js` : admin (4 handlers)
+- `app/api/[[...path]]/controllers/media.controller.js` : média, stream, proxy (16 handlers)
+- `app/api/[[...path]]/controllers/discovery.controller.js` : search, discover, reco, wizard (4 handlers)
+- `app/api/[[...path]]/controllers/user.controller.js` : favoris, prefs, telemetry, ratings (8 handlers)
 
 ### Composants
 - `components/dagzflix/*` : UI métier (dashboard, wizard, player, smart actions)
@@ -326,6 +382,11 @@ DagzFlix est une interface unifiée de streaming et découverte, avec un **BFF A
 - `lib/player-context.js` : PlayerProvider (lecture vidéo globale)
 - `lib/item-store.js` : cache de navigation (transitions instantanées)
 - `lib/constants.js` : constantes UI/domaine
+- `lib/db.js` : MongoDB connection pool + schémas Zod
+- `lib/api-utils.js` : jsonResponse, validateOrigin, getConfig
+- `lib/auth-helpers.js` : getSession (cache), requireAdmin, jellyfinAuthHeader
+- `lib/media-mappers.js` : mapping TMDB/Jellyfin, résolution IDs, favoris, profil
+- `lib/dagzrank.js` : algorithme DagzRank V3, filtre parental, télémétrie
 
 ### Configuration
 - `.env.local` : variables d’environnement locales
@@ -521,13 +582,15 @@ Le détail complet des opérations et correctifs est disponible dans:
 
 - Ajouter observabilité explicite côté UI (message d’erreur API visible au lieu de catch silencieux).
 - Ajouter tests d’intégration pour routes critiques `media/*`.
-- Isoler la route monolithique en modules pour maintenance plus sûre.
+- ~~Isoler la route monolithique en modules pour maintenance plus sûre.~~ ✅ **Fait en V0,011**.
 
 ---
 
 ## 15) Licence / usage
 
 Aucune licence explicite n’est définie dans ce dépôt à date.
-#   v 3  
- #   v 3  
+#   v 3 
+ 
+ #   v 3 
+ 
  

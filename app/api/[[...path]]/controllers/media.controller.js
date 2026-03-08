@@ -113,6 +113,9 @@ export async function handleMediaGenres(req) {
 /**
  * GET /api/person/detail?id={personId}
  */
+/**
+ * GET /api/person/detail?id={personId}
+ */
 export async function handlePersonDetail(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -122,6 +125,28 @@ export async function handlePersonDetail(req) {
   if (!personId) return jsonResponse({ error: 'ID requis' }, 400);
 
   const isNumericId = /^\d+$/.test(personId);
+
+  // ── LA NOUVELLE FONCTION QUI EXCELLE À TROUVER LES FILMS ──
+  const extractCredits = (tmdbData) => {
+    const cast = tmdbData.combinedCredits?.cast || tmdbData.credits?.cast || tmdbData.cast || [];
+    const crew = tmdbData.combinedCredits?.crew || tmdbData.credits?.crew || tmdbData.crew || [];
+    const movieCredits = cast.concat(crew);
+    const seen = new Set();
+    const remoteItems = [];
+    
+    for (const credit of movieCredits) {
+      const tmdbId = String(credit.id);
+      const isTv = (credit.mediaType || credit.media_type) === 'tv';
+      const key = `${tmdbId}_${isTv ? 'tv' : 'movie'}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      remoteItems.push({
+        ...mapTmdbItem(credit, isTv),
+        role: credit.character || credit.job || '',
+      });
+    }
+    return remoteItems;
+  };
 
   if (isNumericId) {
     if (!config.jellyseerrUrl) {
@@ -134,10 +159,7 @@ export async function handlePersonDetail(req) {
     try {
       const tmdbRes = await fetch(
         `${config.jellyseerrUrl}/api/v1/person/${personId}?language=fr`,
-        {
-          headers: { 'X-Api-Key': config.jellyseerrApiKey },
-          signal: AbortSignal.timeout(30000),
-        }
+        { headers: { 'X-Api-Key': config.jellyseerrApiKey }, signal: AbortSignal.timeout(30000) }
       );
       if (tmdbRes.ok) {
         const tmdbData = await tmdbRes.json();
@@ -146,26 +168,10 @@ export async function handlePersonDetail(req) {
           name: tmdbData.name || '',
           overview: tmdbData.biography || '',
           birthDate: tmdbData.birthday || '',
-          photoUrl: tmdbData.profilePath
-            ? `/api/proxy/tmdb?path=${tmdbData.profilePath}&width=w400`
-            : '',
+          photoUrl: tmdbData.profilePath ? `/api/proxy/tmdb?path=${tmdbData.profilePath}&width=w400` : '',
           tmdbId: personId,
         };
-
-        const movieCredits = (tmdbData.combinedCredits?.cast || [])
-          .concat(tmdbData.combinedCredits?.crew || []);
-        const seen = new Set();
-        for (const credit of movieCredits) {
-          const tmdbId = String(credit.id);
-          const isTv = (credit.mediaType || credit.media_type) === 'tv';
-          const key = `${tmdbId}_${isTv ? 'tv' : 'movie'}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          remoteItems.push({
-            ...mapTmdbItem(credit, isTv),
-            role: credit.character || credit.job || '',
-          });
-        }
+        remoteItems = extractCredits(tmdbData);
       }
     } catch (e) {
       console.error('[DagzFlix] Jellyseerr person fetch (TMDB ID) failed:', e.message);
@@ -183,51 +189,62 @@ export async function handlePersonDetail(req) {
             localId: isLocal ? localTmdbIds.get(tmdbStr) : undefined,
           };
         });
-      } catch (_) { /* ignore local lookup failure */ }
+      } catch (_) { }
     }
 
     remoteItems.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
-
     return jsonResponse({ person: personInfo, items: remoteItems });
   }
 
-  // ── Jellyfin UUID path ──
-  const personRes = await fetch(
-    `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${personId}?Fields=ProviderIds,Overview`,
-    {
-      headers: { 'X-Emby-Token': session.jellyfinToken },
-      signal: AbortSignal.timeout(30000),
-    }
-  );
-  if (!personRes.ok) throw new Error(`Jellyfin responded with ${personRes.status}`);
-  const person = await personRes.json();
+  // ── Chemin UUID (Jellyfin) ──
+  let person = null;
+  try {
+    const personRes = await fetch(
+      `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${personId}?Fields=ProviderIds,Overview,PremiereDate`,
+      { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(30000) }
+    );
+    if (personRes.ok) person = await personRes.json();
+  } catch (e) {
+    console.error('[DagzFlix] Jellyfin person details failed:', e.message);
+  }
 
-  let tmdbPersonId = null;
-  if (config.jellyseerrUrl) {
+  if (!person) return jsonResponse({ error: 'Personne introuvable sur Jellyfin' }, 404);
+
+  // Récupérer les films locaux d'abord (C'est ÇA qui manquait !)
+  let localItemsMap = new Map();
+  try {
+    const localItemsRes = await fetch(
+      `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?PersonIds=${personId}&Recursive=true&IncludeItemTypes=Movie,Series&Fields=Overview,ProviderIds,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,MediaSources`,
+      { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(15000) }
+    );
+    if (localItemsRes.ok) {
+      const localData = await localItemsRes.json();
+      (localData.Items || []).forEach(item => {
+        const mapped = mapJellyfinItem(item);
+        if (mapped.tmdbId) localItemsMap.set(String(mapped.tmdbId), mapped);
+        else localItemsMap.set(String(mapped.id), mapped);
+      });
+    }
+  } catch (e) {
+    console.error('[DagzFlix] Jellyfin local person items fetch failed:', e.message);
+  }
+
+  let tmdbPersonId = extractTmdbId(person.ProviderIds || {});
+  
+  if (!tmdbPersonId && config.jellyseerrUrl) {
     try {
       const nameSearchRes = await fetch(
         `${config.jellyseerrUrl}/api/v1/search?query=${encodeURIComponent(person.Name)}&page=1&language=fr`,
-        {
-          headers: { 'X-Api-Key': config.jellyseerrApiKey },
-          signal: AbortSignal.timeout(15000),
-        }
+        { headers: { 'X-Api-Key': config.jellyseerrApiKey }, signal: AbortSignal.timeout(15000) }
       );
       if (nameSearchRes.ok) {
         const nameSearchData = await nameSearchRes.json();
         const personResult = (nameSearchData.results || []).find(r => r.mediaType === 'person');
         if (personResult) tmdbPersonId = String(personResult.id);
       }
-    } catch (e) {
-      console.error('[DagzFlix] Jellyseerr person name search failed:', e.message);
-    }
+    } catch (e) { }
   }
 
-  if (!tmdbPersonId) {
-    const fallbackId = extractTmdbId(person.ProviderIds || {});
-    if (fallbackId) tmdbPersonId = String(fallbackId);
-  }
-
-  let allItems = [];
   let personInfo = {
     id: person.Id,
     name: person.Name,
@@ -237,60 +254,42 @@ export async function handlePersonDetail(req) {
     tmdbId: tmdbPersonId || null,
   };
 
+  let allItems = Array.from(localItemsMap.values());
+
   if (tmdbPersonId && config.jellyseerrUrl) {
     try {
       const tmdbRes = await fetch(
         `${config.jellyseerrUrl}/api/v1/person/${tmdbPersonId}?language=fr`,
-        {
-          headers: { 'X-Api-Key': config.jellyseerrApiKey },
-          signal: AbortSignal.timeout(30000),
-        }
+        { headers: { 'X-Api-Key': config.jellyseerrApiKey }, signal: AbortSignal.timeout(30000) }
       );
       if (tmdbRes.ok) {
         const tmdbData = await tmdbRes.json();
+        
+        personInfo.name = tmdbData.name || personInfo.name;
+        personInfo.overview = tmdbData.biography || personInfo.overview;
+        personInfo.birthDate = tmdbData.birthday || personInfo.birthDate;
+        if (tmdbData.profilePath) {
+          personInfo.photoUrl = `/api/proxy/tmdb?path=${tmdbData.profilePath}&width=w400`;
+        }
 
-        personInfo = {
-          id: person.Id,
-          name: tmdbData.name || person.Name,
-          overview: tmdbData.biography || person.Overview || '',
-          birthDate: tmdbData.birthday || person.PremiereDate || '',
-          photoUrl: tmdbData.profilePath
-            ? `/api/proxy/tmdb?path=${tmdbData.profilePath}&width=w400`
-            : `/api/proxy/image?itemId=${person.Id}&type=Primary&maxWidth=400`,
-          tmdbId: tmdbPersonId,
-        };
-
-        const movieCredits = (tmdbData.combinedCredits?.cast || [])
-          .concat(tmdbData.combinedCredits?.crew || []);
-        const seen = new Set();
-        for (const credit of movieCredits) {
-          const tmdbId = String(credit.id);
-          const isTv = (credit.mediaType || credit.media_type) === 'tv';
-          const key = `${tmdbId}_${isTv ? 'tv' : 'movie'}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
+        const remoteCredits = extractCredits(tmdbData);
+        const localTmdbIds = await getLocalTmdbIds(config, session).catch(() => new Map());
+        
+        for (const remoteItem of remoteCredits) {
+          const tmdbStr = remoteItem.tmdbId ? String(remoteItem.tmdbId) : null;
+          if (tmdbStr && localItemsMap.has(tmdbStr)) continue;
+          
+          const isLocal = tmdbStr && localTmdbIds.has(tmdbStr);
           allItems.push({
-            ...mapTmdbItem(credit, isTv),
-            role: credit.character || credit.job || '',
+            ...remoteItem,
+            mediaStatus: isLocal ? 5 : (remoteItem.mediaStatus || 0),
+            localId: isLocal ? localTmdbIds.get(tmdbStr) : undefined,
           });
         }
       }
     } catch (e) {
       console.error('[DagzFlix] Jellyseerr person filmography fetch failed:', e.message);
     }
-  }
-
-  if (allItems.length > 0) {
-    const localTmdbIds = await getLocalTmdbIds(config, session);
-    allItems = allItems.map(item => {
-      const tmdbStr = item.tmdbId ? String(item.tmdbId) : null;
-      const isLocal = tmdbStr && localTmdbIds.has(tmdbStr);
-      return {
-        ...item,
-        mediaStatus: isLocal ? 5 : (item.mediaStatus || 0),
-        localId: isLocal ? localTmdbIds.get(tmdbStr) : undefined,
-      };
-    });
   }
 
   allItems.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
@@ -1083,14 +1082,14 @@ export async function handleStream(req) {
 
   try {
     const config = await getConfig();
-    let itemId = new URL(req.url).searchParams.get('id');
+    const url = new URL(req.url);
+    let itemId = url.searchParams.get('id');
     if (!itemId) return jsonResponse({ error: 'ID requis' }, 400);
 
     // V7.6: Strip 'tmdb-' prefix if present
     if (itemId.startsWith('tmdb-')) itemId = itemId.replace('tmdb-', '');
 
-    // V7.6: If the ID looks like a TMDB numeric ID (not a Jellyfin UUID),
-    // try to resolve it to a local Jellyfin ID first
+    // Resolve TMDB to local ID
     const isLikelyTmdbId = /^\d+$/.test(itemId);
     if (isLikelyTmdbId) {
       try {
@@ -1099,15 +1098,14 @@ export async function handleStream(req) {
         if (resolvedId) {
           itemId = resolvedId;
         } else {
-          return jsonResponse({ error: 'Media non disponible localement — demandez-le via Jellyseerr', notLocal: true }, 404);
+          return jsonResponse({ error: 'Media non disponible localement', notLocal: true }, 404);
         }
       } catch (resolveErr) {
-        console.error('[handleStream] localTmdbIds lookup failed:', resolveErr.message);
-        return jsonResponse({ error: 'Impossible de résoudre l\'ID local, réessayez', notLocal: true }, 503);
+        return jsonResponse({ error: 'Impossible de résoudre l\'ID local', notLocal: true }, 503);
       }
     }
 
-    // V0.010 — Safety: if the ID is a Series, auto-resolve to next episode
+    // Auto-resolve Series to Next Episode
     try {
       const itemCheck = await fetch(
         `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${itemId}`,
@@ -1116,7 +1114,6 @@ export async function handleStream(req) {
       if (itemCheck.ok) {
         const itemData = await itemCheck.json();
         if (itemData.Type === 'Series') {
-          console.log(`[handleStream] ID ${itemId} is a Series — resolving to next episode`);
           const nextUrl = new URL(req.url);
           nextUrl.searchParams.set('seriesId', itemId);
           const fakeReq = new Request(nextUrl, { headers: req.headers });
@@ -1124,16 +1121,16 @@ export async function handleStream(req) {
           const nextData = await nextRes.json();
           if (nextData.episodeId) {
             itemId = nextData.episodeId;
-            console.log(`[handleStream] Resolved series to episode: ${itemId}`);
           } else {
             return jsonResponse({ error: 'Aucun épisode disponible pour cette série' }, 404);
           }
         }
       }
     } catch (checkErr) {
-      console.warn('[handleStream] Series check failed, proceeding with original ID:', checkErr.message);
+      console.warn('[handleStream] Series check failed:', checkErr.message);
     }
 
+    // Appel PlaybackInfo (OPTIMISÉ SANS MKV EN DIRECT PLAY)
     const res = await fetch(
       `${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`,
       {
@@ -1145,12 +1142,12 @@ export async function handleStream(req) {
         body: JSON.stringify({
           DeviceProfile: {
             MaxStreamingBitrate: 120000000,
-            DirectPlayProfiles: [{ Container: 'mp4,m4v,mkv,webm,avi,mov', Type: 'Video' }],
+            DirectPlayProfiles: [{ Container: 'mp4,m4v,webm,mov', Type: 'Video' }],
             TranscodingProfiles: [
               {
                 Container: 'ts',
                 Type: 'Video',
-                VideoCodec: 'h264,hevc,av1',
+                VideoCodec: 'h264,hevc,av1,vp9',
                 AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
                 Context: 'Streaming',
                 Protocol: 'hls',
@@ -1163,7 +1160,6 @@ export async function handleStream(req) {
               { Format: 'srt', Method: 'External' },
               { Format: 'ass', Method: 'External' },
               { Format: 'ssa', Method: 'External' },
-              { Format: 'sub', Method: 'External' },
             ],
           },
         }),
@@ -1171,29 +1167,34 @@ export async function handleStream(req) {
       }
     );
 
-    if (!res.ok) return jsonResponse({ error: 'Playback info failed — item may not be available locally' }, 404);
+    if (!res.ok) return jsonResponse({ error: 'Playback info failed' }, 404);
     const pb = await res.json();
     const mediaSource = (pb.MediaSources || [])[0];
     const playSessionId = pb.PlaySessionId || uuidv4();
     const streams = mediaSource?.MediaStreams || [];
 
+    // Support multi-audio et sous-titres
     const audioStreamIndexes = streams.filter(s => s.Type === 'Audio').map(s => s.Index).join(',');
     const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
+    
     const hlsParams = new URLSearchParams({
       api_key: session.jellyfinToken,
       MediaSourceId: mediaSource?.Id || '',
       PlaySessionId: playSessionId,
-      VideoCodec: 'h264,hevc,av1',
+      VideoCodec: 'h264,hevc,av1,vp9',
       AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
       SegmentContainer: 'ts',
       EnableAdaptiveBitrateStreaming: 'true',
       SubtitleMethod: 'Hls',
+      EnableAudioTracksInManifest: 'true',
     });
-    if (audioStreamIndexes) hlsParams.set('AudioStreamIndex', audioStreamIndexes.split(',')[0]);
+    
+    //if (audioStreamIndexes) hlsParams.set('AudioStreamIndex', audioStreamIndexes.split(',')[0]);
+    
     if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
-    const hlsCompatUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+    
+    const streamUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
     const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
-    const streamUrl = hlsCompatUrl;
 
     const subtitles = streams
       .filter(s => s.Type === 'Subtitle')
@@ -1228,7 +1229,7 @@ export async function handleStream(req) {
       mediaSourceId: mediaSource?.Id || itemId,
     });
   } catch (err) {
-    console.error('[handleStream] graceful degradation:', err.message);
+    console.error('[handleStream] Error:', err);
     return jsonResponse({ error: 'Stream unavailable' }, 404);
   }
 }

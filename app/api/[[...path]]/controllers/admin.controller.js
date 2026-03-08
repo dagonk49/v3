@@ -89,10 +89,39 @@ export async function handleAdminTelemetry(req) {
       .project({ userId: 1, action: 1, itemId: 1, value: 1, timestamp: 1 })
       .toArray();
 
+    // ── Top 10 médias les plus consultés (clics agrégés) ──
+    const topClicked = await db.collection('telemetry').aggregate([
+      { $match: { action: 'click' } },
+      {
+        $group: {
+          _id: '$itemId',
+          clicks: { $sum: 1 },
+          title: { $last: '$title' },
+          posterUrl: { $last: '$posterUrl' },
+          mediaType: { $last: '$mediaType' },
+          lastClick: { $max: '$timestamp' },
+        },
+      },
+      { $sort: { clicks: -1 } },
+      { $limit: 10 },
+      {
+        $project: {
+          _id: 0,
+          itemId: '$_id',
+          clicks: 1,
+          title: 1,
+          posterUrl: 1,
+          mediaType: 1,
+          lastClick: 1,
+        },
+      },
+    ]).toArray();
+
     return jsonResponse({
       totalEvents,
       actionBreakdown: Object.fromEntries(actionCounts.map(a => [a._id, a.count])),
       recentEvents,
+      topClicked,
     });
   } catch (err) {
     return jsonResponse({ error: err.message }, 500);

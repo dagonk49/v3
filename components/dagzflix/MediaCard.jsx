@@ -17,6 +17,9 @@ function sendClickTelemetry(item) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       itemId: String(itemId),
+      title: item.name || item.title || '',
+      posterUrl: item.posterUrl || item.poster || '',
+      type: item.type || '',
       genres: item.genres || [],
     }),
   }).catch(() => { });

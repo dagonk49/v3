@@ -58,7 +58,20 @@ export async function handleMediaFavoritesGet(req) {
     .sort({ createdAt: -1 })
     .toArray();
 
-  const items = favorites.map(f => f.itemData).filter(Boolean);
+  // Robuste : inclure les docs avec itemData OU construire un minimum depuis itemId
+  const items = favorites
+    .map(f => {
+      if (f.itemData && typeof f.itemData === 'object' && (f.itemData.id || f.itemData.tmdbId || f.itemData.name)) {
+        return f.itemData;
+      }
+      // Fallback pour les anciens docs sans itemData complète
+      if (f.itemId) {
+        return { id: f.itemId, name: `Media #${f.itemId}`, type: 'unknown', isFavorite: true };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
   return jsonResponse({ items });
 }
 
@@ -107,7 +120,7 @@ export async function handleTelemetryClick(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
 
-  const { itemId, genres } = await req.json();
+  const { itemId, title, posterUrl, type, genres } = await req.json();
   if (!itemId) return jsonResponse({ error: 'itemId requis' }, 400);
 
   const db = await getDb();
@@ -116,6 +129,9 @@ export async function handleTelemetryClick(req) {
     itemId: String(itemId),
     action: 'click',
     value: 1,
+    title: title || '',
+    posterUrl: posterUrl || '',
+    mediaType: type || '',
     genres: genres || [],
     timestamp: new Date(),
   });

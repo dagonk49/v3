@@ -23,6 +23,9 @@ export default function FavoritesPage() {
         if (status !== 'ready') return;
         let cancelled = false;
 
+        // Invalider le cache AVANT de fetcher pour toujours avoir des données fraîches
+        invalidateCache('media/favorites');
+
         (async () => {
             try {
                 const data = await cachedApi('media/favorites');
@@ -37,9 +40,6 @@ export default function FavoritesPage() {
                 if (!cancelled) setLoading(false);
             }
         })();
-
-        // Optionnel : Invalider le cache lors du montage pour toujours avoir la dernière liste
-        invalidateCache('media/favorites');
 
         return () => { cancelled = true; };
     }, [status]);
@@ -94,6 +94,7 @@ export default function FavoritesPage() {
                                         item={item}
                                         onClick={handleItemClick}
                                         index={idx}
+                                        gridMode
                                     />
                                 ))}
                             </motion.div>

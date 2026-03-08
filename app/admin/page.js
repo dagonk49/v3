@@ -246,6 +246,70 @@ export default function AdminPage() {
               />
             </div>
 
+            {/* ── Top 10 médias les plus consultés ── */}
+            {!telemetryLoading && telemetry?.topClicked?.length > 0 && (
+              <div className="rounded-2xl border border-white/5 bg-white/[0.02] overflow-hidden mb-8">
+                <div className="px-5 py-4 bg-white/[0.03] border-b border-white/5 flex items-center gap-3">
+                  <div className="p-1.5 bg-amber-500/10 rounded-lg">
+                    <BarChart3 className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <h2 className="text-sm font-semibold text-white/80">Top 10 — Médias les plus consultés</h2>
+                </div>
+                <div className="divide-y divide-white/[0.03]">
+                  {telemetry.topClicked.map((item, idx) => (
+                    <div
+                      key={item.itemId}
+                      className="flex items-center gap-4 px-5 py-3 hover:bg-white/[0.02] transition-colors"
+                    >
+                      {/* Rank */}
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
+                        idx === 0 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : idx === 1 ? 'bg-gray-400/15 text-gray-300 border border-gray-400/20'
+                        : idx === 2 ? 'bg-orange-500/15 text-orange-300 border border-orange-500/20'
+                        : 'bg-white/5 text-white/40 border border-white/5'
+                      }`}>
+                        {idx + 1}
+                      </div>
+                      {/* Poster */}
+                      {item.posterUrl ? (
+                        <img
+                          src={item.posterUrl}
+                          alt={item.title || ''}
+                          className="w-10 h-14 rounded-lg object-cover shrink-0 bg-white/5"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-10 h-14 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                          <Film className="w-4 h-4 text-white/20" />
+                        </div>
+                      )}
+                      {/* Title + metadata */}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{item.title || `ID: ${item.itemId}`}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {item.mediaType && (
+                            <span className="text-[10px] uppercase tracking-wider text-white/30 bg-white/5 px-2 py-0.5 rounded-full">
+                              {item.mediaType === 'Series' ? 'Série' : item.mediaType === 'Movie' ? 'Film' : item.mediaType}
+                            </span>
+                          )}
+                          {item.lastClick && (
+                            <span className="text-[10px] text-white/25">
+                              Dernier clic : {new Date(item.lastClick).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* Click count */}
+                      <div className="text-right shrink-0">
+                        <p className="text-lg font-bold text-amber-300">{item.clicks}</p>
+                        <p className="text-[10px] text-white/30 uppercase tracking-wider">clic{item.clicks > 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ── Users table ── */}
             <div className="rounded-2xl border border-white/5 bg-white/[0.02] overflow-hidden">
               {/* Header */}

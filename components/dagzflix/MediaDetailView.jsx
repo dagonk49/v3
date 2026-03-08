@@ -14,6 +14,7 @@ import { pageVariants, GENRE_ICONS } from '@/lib/constants';
 import { SmartButton, TrailerButton } from './SmartButton';
 import { VideoPlayer } from './VideoPlayer';
 import { MediaCard, MediaRow } from './MediaCard';
+import { MediaModal } from './MediaModal';
 
 // ─── Star Rating Component ─────────────────────────────────────
 /**
@@ -288,12 +289,13 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
   const [playEpId, setPlayEpId] = useState(null);
   const [subs, setSubs] = useState([]);
   const [audio, setAudio] = useState([]);
+  const [showRequestModal, setShowRequestModal] = useState(false);
   const itemKey = item?.id || item?.tmdbId || '';
 
   useEffect(() => {
     // Reset ALL state on item change - fixes saga/collection persistence bug
     setDetail(null); setSimilar([]); setSeasons([]); setSelectedSeason(null); setEpisodes([]);
-    setCollection(null); setCollectionItems([]); setSubs([]); setAudio([]); setImgError(false); setLoading(true);
+    setCollection(null); setCollectionItems([]); setSubs([]); setAudio([]); setImgError(false); setShowRequestModal(false); setLoading(true);
     fetchAll();
   }, [itemKey]);
 
@@ -360,6 +362,7 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
   return (
     <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" data-testid="media-detail-view" className="min-h-screen bg-[#050505]">
       <AnimatePresence>{showPlayer && <VideoPlayer item={d} episodeId={playEpId} onClose={() => { setShowPlayer(false); setPlayEpId(null); }} />}</AnimatePresence>
+      <MediaModal item={d} isOpen={showRequestModal} onClose={() => setShowRequestModal(false)} onRequested={() => { /* refresh status if needed */ }} />
 
       {/* Backdrop */}
       <div className="relative h-[55vh] min-h-[400px]">
@@ -416,7 +419,7 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
             {/* ── User Star Rating ── */}
             <StarRating item={d} />
             <div className="flex flex-wrap items-center gap-3 mb-6">
-              <SmartButton item={d} onPlay={(item, episodeId) => { if (episodeId) setPlayEpId(episodeId); setShowPlayer(true); }} />
+              <SmartButton item={d} onPlay={(item, episodeId) => { if (episodeId) setPlayEpId(episodeId); setShowPlayer(true); }} onRequestModal={() => setShowRequestModal(true)} />
               <TrailerButton item={d} />
               <FavoriteButton item={d} />
             </div>

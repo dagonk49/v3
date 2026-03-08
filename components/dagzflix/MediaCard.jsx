@@ -41,13 +41,18 @@ const cardVariants = {
  * @param {Function} props.onClick - Callback lors du clic
  * @param {'normal'|'large'} [props.size='normal'] - Taille de la carte
  * @param {number} [props.index=0] - Index pour le stagger animation
+ * @param {boolean} [props.gridMode=false] - Si true, la carte remplie la cellule CSS Grid (w-full au lieu de w fixe)
  */
-export function MediaCard({ item, onClick, size = 'normal', index = 0 }) {
+export function MediaCard({ item, onClick, size = 'normal', index = 0, gridMode = false }) {
   const [imgErr, setImgErr] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const { status } = useAuth();
 
-  const w = size === 'large' ? 'w-[220px] md:w-[260px]' : 'w-[160px] md:w-[185px]';
+  // En mode grid, la carte remplit la cellule CSS Grid (w-full).
+  // En mode row (horizontal scroll), on garde la largeur fixe + flex-shrink-0.
+  const w = gridMode
+    ? 'w-full'
+    : size === 'large' ? 'w-[220px] md:w-[260px]' : 'w-[160px] md:w-[185px]';
 
   // Initialize favorite status (simplified check if items has isFavorite prop, otherwise will be fetched deeply in MediaDetailView)
   useEffect(() => {
@@ -90,7 +95,7 @@ export function MediaCard({ item, onClick, size = 'normal', index = 0 }) {
   return (
     <motion.div
       data-testid={`media-card-${item.id || item.tmdbId}`}
-      className={`flex-shrink-0 ${w} cursor-pointer group`}
+      className={`${gridMode ? '' : 'flex-shrink-0'} ${w} cursor-pointer group`}
       onClick={handleClick}
       variants={cardVariants}
       initial="hidden"

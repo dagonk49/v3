@@ -7,11 +7,12 @@ import { api, cachedApi } from '@/lib/api';
 
 const resolveTmdbId = (item) => item?.tmdbId || item?.providerIds?.Tmdb || item?.providerIds?.TMDb || item?.providerIds?.tmdb || null;
 
-export function SmartButton({ item, onPlay }) {
+export function SmartButton({ item, onPlay, onRequestModal }) {
   const [status, setStatus] = useState('loading');
   const [requesting, setRequesting] = useState(false);
   const [requested, setRequested] = useState(false);
   const [nextEp, setNextEp] = useState(null);
+  const isSeries = item?.type === 'Series' || item?.mediaType === 'tv';
 
   useEffect(() => { if (item) check(); }, [item?.id]);
 
@@ -64,6 +65,11 @@ export function SmartButton({ item, onPlay }) {
   };
 
   const req = async () => {
+    // Pour les séries, ouvre le modal de sélection de saisons
+    if (isSeries && onRequestModal) {
+      onRequestModal();
+      return;
+    }
     setRequesting(true);
     try {
       const tmdbId = resolveTmdbId(item);

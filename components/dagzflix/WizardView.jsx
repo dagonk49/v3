@@ -158,7 +158,7 @@ export function WizardView({ mediaType, onItemClick }) {
                 {alternatives.length > 0 && (
                   <div className="mt-6">
                     <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Sparkles className="w-5 h-5 text-purple-400" />Autres suggestions</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{alternatives.slice(0, 6).map((a, i) => <MediaCard key={a.id || i} item={a} onClick={onItemClick} />)}</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{alternatives.slice(0, 6).map((a, i) => <MediaCard key={a.id || i} item={a} onClick={onItemClick} gridMode />)}</div>
                   </div>
                 )}
                 <div className="text-center mt-8 flex flex-col sm:flex-row gap-3 justify-center">

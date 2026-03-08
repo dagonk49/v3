@@ -312,7 +312,7 @@ export async function handleMediaDetail(req) {
   // 1) Try Jellyfin first (local item)
   let jellyfinItem = null;
   try {
-    const res = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${itemId}?Fields=Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,People,ProviderIds,MediaSources,Studios,Taglines,ExternalUrls,HasSubtitles`, {
+    const res = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${itemId}?Fields=Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,People,ProviderIds,MediaSources,Studios,Taglines,ExternalUrls,HasSubtitles,ChildCount`, {
       headers: { 'X-Emby-Token': session.jellyfinToken },
       signal: AbortSignal.timeout(30000),
     });
@@ -403,6 +403,11 @@ export async function handleMediaDetail(req) {
         externalUrls: jellyfinItem.ExternalUrls || [],
         mediaStatus: 5,
         isFavorite: !!(favDoc || favDocTmdb),
+        // Infos séries : ChildCount = nombre de saisons sur Jellyfin
+        ...(jellyfinItem.Type === 'Series' && {
+          numberOfSeasons: jellyfinItem.ChildCount || 0,
+          seasonCount: jellyfinItem.ChildCount || 0,
+        }),
       },
     });
   }
@@ -506,6 +511,11 @@ export async function handleMediaDetail(req) {
       mediaStatus: isLocallyAvailable ? 5 : Math.min(tmdbData.mediaInfo?.status || 0, 4),
       localId: localJellyfinId,
       isFavorite: !!favDoc,
+      // Infos séries TV (Jellyseerr/TMDB expose numberOfSeasons pour les TV shows)
+      ...(isTv && {
+        numberOfSeasons: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0,
+        seasonCount: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0,
+      }),
     },
   });
 }

@@ -68,7 +68,7 @@ export async function handleSearch(req) {
     });
   }
 
-  if (config.jellyseerrUrl) {
+ if (config.jellyseerrUrl) {
     try {
       const res = await fetch(`${config.jellyseerrUrl}/api/v1/search?query=${encodeURIComponent(query)}&page=${page}`, {
         headers: { 'X-Api-Key': config.jellyseerrApiKey },
@@ -77,10 +77,13 @@ export async function handleSearch(req) {
       if (res.ok) {
         const data = await res.json();
         let mapped = (data.results || []).map(item => mapTmdbItem(item));
+        
+        // PROTECTION SEERR : On supprime les acteurs des résultats de médias pour ne pas faire crasher l'UI
         if (mediaType === 'movie') mapped = mapped.filter(i => i.type === 'Movie');
         else if (mediaType === 'tv') mapped = mapped.filter(i => i.type === 'Series');
+        else mapped = mapped.filter(i => i.type === 'Movie' || i.type === 'Series'); 
+
         let scored = scoreResults(mapped);
-        // V7.5 : inject favorite status
         scored = await injectFavoriteStatus(scored, session.userId);
         return jsonResponse({
           results: scored,

@@ -6,7 +6,7 @@ services:
     container_name: dagzflix_web-V2
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3003:3000"
     environment:
       - NODE_ENV=production
       # N'oublie pas de mettre tes vraies URL dans ce fichier ou dans un .env

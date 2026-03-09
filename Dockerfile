@@ -3,7 +3,7 @@ FROM node:18-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-RUN npm ci
+RUN npm install
 
 # Étape 2 : Build
 FROM node:18-alpine AS builder

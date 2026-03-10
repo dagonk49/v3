@@ -41,16 +41,9 @@ export function WizardView({ mediaType, onItemClick }) {
     try {
       await api('wizard/feedback', {
         method: 'POST',
-        body: JSON.stringify({
-          action: 'reject',
-          itemId: result.id,
-          tmdbId: result.tmdbId,
-          genres: result.genres || [],
-        }),
+        body: JSON.stringify({ action: 'reject', itemId: result.id, tmdbId: result.tmdbId, genres: result.genres || [] }),
       });
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) {}
     await discover(nextExcludedIds);
   };
 
@@ -68,11 +61,8 @@ export function WizardView({ mediaType, onItemClick }) {
             <p className="text-gray-500 mb-8">Dis-moi ce que tu ressens ce soir</p>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 max-w-3xl mx-auto">
               {MOODS.map(m => (
-                <button key={m.id} data-testid={`wizard-mood-${m.id}`} onClick={() => { setMood(m.id); setStep(2); }}
-                  className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all group">
-                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${m.color} flex items-center justify-center mx-auto mb-4 group-hover:shadow-lg transition-all`}>
-                    <m.icon className="w-7 h-7 text-white" />
-                  </div>
+                <button key={m.id} data-testid={`wizard-mood-${m.id}`} onClick={() => { setMood(m.id); setStep(2); }} className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all group">
+                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${m.color} flex items-center justify-center mx-auto mb-4 group-hover:shadow-lg transition-all`}><m.icon className="w-7 h-7 text-white" /></div>
                   <h3 className="font-bold text-white mb-1">{m.label}</h3>
                   <p className="text-xs text-gray-500">{m.desc}</p>
                 </button>
@@ -88,10 +78,8 @@ export function WizardView({ mediaType, onItemClick }) {
             <p className="text-gray-500 mb-8">Choisis la période qui te parle</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto">
               {ERAS.map(e => (
-                <button key={e.id} data-testid={`wizard-era-${e.id}`} onClick={() => { setEra(e.id); setStep(3); }}
-                  className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all">
-                  <h3 className="font-bold text-white mb-1">{e.label}</h3>
-                  <p className="text-xs text-gray-500">{e.desc}</p>
+                <button key={e.id} data-testid={`wizard-era-${e.id}`} onClick={() => { setEra(e.id); setStep(3); }} className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all">
+                  <h3 className="font-bold text-white mb-1">{e.label}</h3><p className="text-xs text-gray-500">{e.desc}</p>
                 </button>
               ))}
             </div>
@@ -106,10 +94,8 @@ export function WizardView({ mediaType, onItemClick }) {
             <p className="text-gray-500 mb-8">On adapte la durée à ton planning</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto">
               {DURATIONS.map(dd => (
-                <button key={dd.id} data-testid={`wizard-dur-${dd.id}`} onClick={() => { setDuration(dd.id); setStep(4); }}
-                  className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all">
-                  <h3 className="font-bold text-white mb-1">{dd.label}</h3>
-                  <p className="text-xs text-gray-500">{dd.desc}</p>
+                <button key={dd.id} data-testid={`wizard-dur-${dd.id}`} onClick={() => { setDuration(dd.id); setStep(4); }} className="glass-card rounded-3xl p-6 text-center hover:scale-105 transition-all">
+                  <h3 className="font-bold text-white mb-1">{dd.label}</h3><p className="text-xs text-gray-500">{dd.desc}</p>
                 </button>
               ))}
             </div>
@@ -121,11 +107,8 @@ export function WizardView({ mediaType, onItemClick }) {
           <motion.div key="w4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
             {loading ? (
               <div className="text-center py-20">
-                <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }} className="w-20 h-20 mx-auto mb-6">
-                  <Wand2 className="w-20 h-20 text-purple-400" />
-                </motion.div>
-                <h2 className="text-xl font-bold mb-2">Le Magicien cherche...</h2>
-                <p className="text-gray-500">Analyse de tes goûts en cours</p>
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }} className="w-20 h-20 mx-auto mb-6"><Wand2 className="w-20 h-20 text-purple-400" /></motion.div>
+                <h2 className="text-xl font-bold mb-2">Le Magicien cherche...</h2><p className="text-gray-500">Analyse de tes goûts en cours</p>
               </div>
             ) : result ? (
               <div>
@@ -148,9 +131,25 @@ export function WizardView({ mediaType, onItemClick }) {
                           {result.voteAverage > 0 && <span className="flex items-center gap-1 text-yellow-400"><Star className="w-4 h-4 fill-current" />{result.voteAverage.toFixed(1)}</span>}
                         </div>
                         <p className="text-gray-300 mb-6 leading-relaxed line-clamp-4">{result.overview}</p>
-                        <Button data-testid="wizard-result-detail" onClick={() => onItemClick(result)} className="bg-white hover:bg-gray-100 text-black font-bold px-8 h-12 rounded-xl">
+                        
+                        {/* 🚨 LE CORRECTIF EST ICI POUR LE BOUTON DU MAGICIEN 🚨 */}
+                        <Button 
+                          data-testid="wizard-result-detail" 
+                          onClick={() => {
+                            const safeItem = { ...result };
+                            let rawId = String(result.id || result.tmdbId);
+                            if (/^\d+$/.test(rawId) || (rawId.startsWith('tmdb-') && !rawId.includes('-tv-') && !rawId.includes('-movie-'))) {
+                              const cleanId = rawId.replace(/^tmdb-(tv-|movie-)?/, '');
+                              const isTv = result.mediaType === 'tv' || result.type === 'Series';
+                              safeItem.id = `tmdb-${isTv ? 'tv' : 'movie'}-${cleanId}`;
+                            }
+                            onItemClick(safeItem);
+                          }} 
+                          className="bg-white hover:bg-gray-100 text-black font-bold px-8 h-12 rounded-xl"
+                        >
                           <Info className="w-5 h-5 mr-2" />Voir les détails
                         </Button>
+
                       </div>
                     </div>
                   </div>
@@ -162,12 +161,8 @@ export function WizardView({ mediaType, onItemClick }) {
                   </div>
                 )}
                 <div className="text-center mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-                  <Button data-testid="wizard-retry" onClick={rejectAndRetry} variant="outline" className="border-white/10 text-gray-300 rounded-xl">
-                    <Wand2 className="w-4 h-4 mr-2" />Réessayer
-                  </Button>
-                  <Button data-testid="wizard-reset" onClick={reset} variant="outline" className="border-white/10 text-gray-300 rounded-xl">
-                    <Wand2 className="w-4 h-4 mr-2" />Relancer le Magicien
-                  </Button>
+                  <Button data-testid="wizard-retry" onClick={rejectAndRetry} variant="outline" className="border-white/10 text-gray-300 rounded-xl"><Wand2 className="w-4 h-4 mr-2" />Réessayer</Button>
+                  <Button data-testid="wizard-reset" onClick={reset} variant="outline" className="border-white/10 text-gray-300 rounded-xl"><Wand2 className="w-4 h-4 mr-2" />Relancer le Magicien</Button>
                 </div>
               </div>
             ) : (

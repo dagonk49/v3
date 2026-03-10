@@ -6,8 +6,7 @@ import { Star, Clapperboard, ChevronLeft, ChevronRight, Loader2, Heart, Building
 import { useAuth } from '@/lib/auth-context';
 
 /**
- * Envoie un événement de clic télémétrie (fire & forget, non-bloquant).
- * @param {Object} item - L'item cliqué
+ * Envoie un événement de clic télémétrie.
  */
 function sendClickTelemetry(item) {
   const itemId = item.id || item.tmdbId;
@@ -25,72 +24,60 @@ function sendClickTelemetry(item) {
   }).catch(() => { });
 }
 
-/** Variants d'animation stagger pour les cards dans une grille */
 const cardVariants = {
   hidden: { opacity: 0, y: 20, scale: 0.97 },
   visible: (i) => ({
-    opacity: 1,
-    y: 0,
-    scale: 1,
+    opacity: 1, y: 0, scale: 1,
     transition: { delay: i * 0.04, duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] },
   }),
 };
 
-/**
- * MediaCard — Carte média avec poster, rating, DagzRank et télémétrie de clic.
- * Supporte le stagger animation via la prop `index`.
- * @param {Object} props
- * @param {Object} props.item - Le média (id, name, posterUrl, year, communityRating, dagzRank, genres, studios...)
- * @param {Function} props.onClick - Callback lors du clic
- * @param {'normal'|'large'} [props.size='normal'] - Taille de la carte
- * @param {number} [props.index=0] - Index pour le stagger animation
- * @param {boolean} [props.gridMode=false] - Si true, la carte remplie la cellule CSS Grid (w-full au lieu de w fixe)
- */
 export function MediaCard({ item, onClick, size = 'normal', index = 0, gridMode = false }) {
   const [imgErr, setImgErr] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const { status } = useAuth();
 
-  // En mode grid, la carte remplit la cellule CSS Grid (w-full).
-  // En mode row (horizontal scroll), on garde la largeur fixe + flex-shrink-0.
   const w = gridMode
     ? 'w-full'
     : size === 'large' ? 'w-[220px] md:w-[260px]' : 'w-[160px] md:w-[185px]';
 
-  // Initialize favorite status (simplified check if items has isFavorite prop, otherwise will be fetched deeply in MediaDetailView)
   useEffect(() => {
     if (item.isFavorite !== undefined) {
       setIsFavorite(item.isFavorite);
     }
   }, [item]);
 
+  // 🚨 LE CORRECTIF DU CLIC EST ICI 🚨
   const handleClick = useCallback(() => {
-    sendClickTelemetry(item);
-    onClick(item);
+    // On crée une copie de l'item pour y injecter le bon ID sans modifier les props
+    const safeItem = { ...item };
+    let rawId = String(item.id || item.tmdbId);
+    
+    // Si l'ID est un nombre ou un ancien 'tmdb-123' sans type précisé
+    if (/^\d+$/.test(rawId) || (rawId.startsWith('tmdb-') && !rawId.includes('-tv-') && !rawId.includes('-movie-'))) {
+      const cleanId = rawId.replace(/^tmdb-(tv-|movie-)?/, '');
+      const isTv = item.mediaType === 'tv' || item.type === 'Series';
+      safeItem.id = `tmdb-${isTv ? 'tv' : 'movie'}-${cleanId}`;
+    }
+    
+    sendClickTelemetry(safeItem);
+    onClick(safeItem); // On envoie l'ID blindé au routeur !
   }, [item, onClick]);
 
   const toggleFavorite = async (e) => {
-    e.stopPropagation(); // Prevenir la navigation vers detail view
+    e.stopPropagation();
     if (status !== 'ready') return;
-
     const itemId = item.id || item.tmdbId;
     if (!itemId) return;
 
-    // Optimistic UI
     setIsFavorite(!isFavorite);
-
     try {
       const res = await fetch('/api/media/favorite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId, itemData: item })
       });
-      if (!res.ok) throw new Error('Failed to toggle favorite');
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (!res.ok) throw new Error('Failed');
     } catch (e) {
-      console.error(e);
-      // Revert on error
       setIsFavorite(isFavorite);
     }
   };
@@ -101,11 +88,8 @@ export function MediaCard({ item, onClick, size = 'normal', index = 0, gridMode 
       className={`${gridMode ? '' : 'flex-shrink-0'} ${w} cursor-pointer group`}
       onClick={handleClick}
       variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      custom={index}
-      whileHover={{ scale: 1.06, y: -8 }}
-      whileTap={{ scale: 0.98 }}
+      initial="hidden" animate="visible" custom={index}
+      whileHover={{ scale: 1.06, y: -8 }} whileTap={{ scale: 0.98 }}
       transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
     >
       <div className="aspect-[2/3] rounded-2xl overflow-hidden bg-white/3 relative card-reflection shadow-lg shadow-black/30">
@@ -128,45 +112,23 @@ export function MediaCard({ item, onClick, size = 'normal', index = 0, gridMode 
               <span className="text-red-400 text-[10px] font-bold">{item.dagzRank}%</span>
             </div>
           )}
-          {item.studios?.length > 0 && (
-            <Link href={`/search?studio=${encodeURIComponent(item.studios[0])}`} onClick={e => e.stopPropagation()}
-              className="mt-1 flex items-center gap-1 text-gray-500 hover:text-white text-[10px] truncate transition-colors">
-              <Building2 className="w-2.5 h-2.5 flex-shrink-0" />{item.studios[0]}
-            </Link>
-          )}
         </div>
 
-        {/* Availability Badge */}
         {item.mediaStatus === 5 && (
           <div className="absolute top-2.5 left-2.5 z-10">
             <div className="bg-green-500/90 backdrop-blur text-white text-[10px] px-2 py-0.5 rounded-lg font-medium shadow-md">Disponible</div>
           </div>
         )}
 
-        {/* Favorite Heart Icon - Visible on hover or when favorited */}
         <div className={`absolute top-2.5 right-2.5 z-20 ${isFavorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
-          <motion.button
-            whileTap={{ scale: 0.8 }}
-            onClick={toggleFavorite}
-            className={`w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-colors shadow-lg ${isFavorite ? 'bg-red-500/20 hover:bg-red-500/30' : 'bg-black/40 hover:bg-black/60'
-              }`}
-          >
+          <motion.button whileTap={{ scale: 0.8 }} onClick={toggleFavorite} className={`w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-colors shadow-lg ${isFavorite ? 'bg-red-500/20 hover:bg-red-500/30' : 'bg-black/40 hover:bg-black/60'}`}>
             <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={isFavorite ? 'filled' : 'outline'}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              >
-                <Heart
-                  className={`w-4 h-4 ${isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`}
-                />
+              <motion.div key={isFavorite ? 'filled' : 'outline'} initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
+                <Heart className={`w-4 h-4 ${isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`} />
               </motion.div>
             </AnimatePresence>
           </motion.button>
         </div>
-
       </div>
       <p className="text-gray-400 text-sm mt-2.5 truncate font-medium">{item.name}</p>
     </motion.div>

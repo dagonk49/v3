@@ -17,13 +17,6 @@ import { MediaCard, MediaRow } from './MediaCard';
 import { MediaModal } from './MediaModal';
 
 // ─── Star Rating Component ─────────────────────────────────────
-/**
- * StarRating — Composant interactif de notation par étoiles (1-5).
- * Hover preview + clic pour noter. Fire & forget vers POST /api/media/rate.
- * Affiche aussi la note moyenne globale si disponible.
- * @param {Object} props
- * @param {Object} props.item - Le média à noter (id, tmdbId, genres)
- */
 function StarRating({ item }) {
   const [userRating, setUserRating] = useState(null);
   const [globalAvg, setGlobalAvg] = useState(null);
@@ -56,7 +49,6 @@ function StarRating({ item }) {
         }),
       });
       invalidateCache('media/rating');
-      // Refresh global stats
       const data = await api(`media/rating?id=${contentId}`);
       if (data.globalAverage) setGlobalAvg(data.globalAverage);
       if (data.totalRatings) setTotalRatings(data.totalRatings);
@@ -102,17 +94,12 @@ function StarRating({ item }) {
 }
 
 /* ─── Favorite Button ─────────────────────────────────────────── */
-/**
- * FavoriteButton — Bouton pour ajouter/retirer des favoris.
- * @param {Object} props.item - Le média (id, tmdbId, name, posterUrl, etc.)
- */
 function FavoriteButton({ item }) {
   const [isFavorite, setIsFavorite] = useState(false);
   const [loading, setLoading] = useState(false);
   const { status } = useAuth();
   const contentId = item?.id || item?.tmdbId;
 
-  // Initialiser l'état selon la propriété injectée
   useEffect(() => {
     if (item?.isFavorite !== undefined) {
       setIsFavorite(item.isFavorite);
@@ -122,7 +109,6 @@ function FavoriteButton({ item }) {
   const toggleFavorite = async () => {
     if (status !== 'ready' || !contentId || loading) return;
     setLoading(true);
-    // Optimistic
     setIsFavorite(!isFavorite);
     try {
       const res = await fetch('/api/media/favorite', {
@@ -135,7 +121,6 @@ function FavoriteButton({ item }) {
       if (!data.success) throw new Error(data.error);
     } catch (e) {
       console.error(e);
-      // Revert if error
       setIsFavorite(isFavorite);
     } finally {
       setLoading(false);
@@ -171,21 +156,8 @@ function FavoriteButton({ item }) {
 }
 
 /* ─── Person Card (casting) ──────────────────────────────────────── */
-/**
- * PersonCard — Composant de carte d'acteur dans la section Casting.
- * Affiche la photo, le nom et le rôle d'un acteur/membre d'équipe.
- *
- * Deux modes d'affichage :
- *  - Acteur Jellyfin (person.Id) : photo via proxy Jellyfin, lien vers /person/{Id}
- *  - Acteur TMDB (person.tmdbId) : photo via person.photoUrl (proxy TMDB), lien vers /person/{tmdbId}
- *  - Aucun ID : carte non-cliquable (fallback <div>)
- *
- * @param {Object} props
- * @param {Object} props.person - {Id?, tmdbId?, name, role, type, photoUrl?}
- */
 function PersonCard({ person }) {
   const [imgErr, setImgErr] = useState(false);
-  // Support both Jellyfin (person.Id → proxy) and TMDB (person.photoUrl direct)
   const photoUrl = person.Id
     ? `/api/proxy/image?itemId=${person.Id}&type=Primary&maxWidth=200`
     : person.photoUrl || null;
@@ -208,7 +180,6 @@ function PersonCard({ person }) {
 
   const cls = "flex-shrink-0 min-w-[120px] w-[120px] cursor-pointer group block";
   const title = `${person.name}${person.role ? ' — ' + person.role : ''}`;
-  // Use Jellyfin Id if available, otherwise fallback to TMDB Id for remote actors
   const linkId = person.Id || person.tmdbId;
 
   return linkId ? (
@@ -218,13 +189,6 @@ function PersonCard({ person }) {
   );
 }
 
-/**
- * EpisodeCard — Carte d'épisode dans la section Saisons.
- * Affiche thumbnail, numéro, titre, durée, synopsis et badge "vu".
- * @param {Object} props
- * @param {Object} props.ep - Épisode {id, name, overview, episodeNumber, runtime, thumbUrl, isPlayed}
- * @param {Function} props.onPlay - Callback appelé avec l'ID de l'épisode au clic
- */
 function EpisodeCard({ ep, onPlay }) {
   const [imgErr, setImgErr] = useState(false);
   return (
@@ -254,26 +218,6 @@ function EpisodeCard({ ep, onPlay }) {
   );
 }
 
-/**
- * MediaDetailView — Vue détail complète d'un média (film ou série).
- *
- * Lifecycle :
- *  1. Reset all state on item change (itemKey)
- *  2. fetchAll() : appelle /api/media/detail (Jellyfin ou TMDB fallback)
- *  3. Si série locale : charge saisons + épisodes
- *  4. Si film : charge la collection/saga via /api/media/collection
- *  5. Si local : charge sous-titres et pistes audio via /api/media/stream
- *
- * Sections affichées : backdrop, poster, métadonnées, genres cliquables,
- * DagzRank, boutons (SmartButton, TrailerButton), overview, sous-titres/audio,
- * casting (PersonCard), crew, saisons/épisodes, collection/saga, similaires.
- *
- * @param {Object} props
- * @param {Object} props.item - Item source (depuis MediaCard ou SearchView)
- * @param {Function} props.onBack - Callback retour arrière
- * @param {Function} props.onPlay - Callback lecture directe
- * @param {Function} props.onItemClick - Callback navigation vers un autre média
- */
 export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
   const [detail, setDetail] = useState(null);
   const [similar, setSimilar] = useState([]);
@@ -292,8 +236,19 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const itemKey = item?.id || item?.tmdbId || '';
 
+  // 📡 LE NOUVEAU RADAR ELECTRON EST ICI 📡
+  const handlePlay = useCallback((playItem, epId = null) => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      console.log("🎬 [DagzFlix PC] Clic intercepté dans DetailView ! Envoi au lecteur natif...");
+      window.electronAPI.launchMpv({ item: playItem, episodeId: epId });
+      return; 
+    }
+    
+    if (epId) setPlayEpId(epId);
+    setShowPlayer(true);
+  }, []);
+
   useEffect(() => {
-    // Reset ALL state on item change - fixes saga/collection persistence bug
     setDetail(null); setSimilar([]); setSeasons([]); setSelectedSeason(null); setEpisodes([]);
     setCollection(null); setCollectionItems([]); setSubs([]); setAudio([]); setImgError(false); setShowRequestModal(false); setLoading(true);
     fetchAll();
@@ -301,14 +256,12 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
 
   const fetchAll = async () => {
     let fi = item;
-    // Always try to fetch enriched detail from backend (supports both Jellyfin IDs and TMDB IDs)
     const detailId = item.id || item.tmdbId;
     if (detailId) {
       try {
         const r = await cachedApi(`media/detail?id=${detailId}`);
         if (r.item) { setDetail(r.item); fi = r.item; setSimilar(r.similar || []); }
       } catch {
-        // Fallback: use the item data we already have (from search/card)
         setDetail(item);
         fi = item;
       }
@@ -320,7 +273,6 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
     const isSeries = fi?.type === 'Series';
     const fId = fi?.id;
     const tmdbId = fi?.tmdbId || fi?.providerIds?.Tmdb;
-    // V7.6: Use mediaStatus to determine local availability instead of ID prefix heuristic
     const isLocallyAvailable = fi?.mediaStatus === 5 || fi?.localId;
     const streamId = fi?.localId || fId;
     const canStreamFromJellyfin = !!streamId && isLocallyAvailable;
@@ -329,14 +281,12 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
       try { const r = await cachedApi(`media/seasons?seriesId=${streamId}`); const s = r.seasons || []; setSeasons(s); if (s.length > 0) { setSelectedSeason(s[0]); fetchEps(streamId, s[0].id); } } catch { /* ignore */ }
     }
 
-    // Only fetch collection for non-series
     if (!isSeries) {
       try {
         const p = new URLSearchParams();
         if (fId) p.set('id', fId);
         if (tmdbId) p.set('tmdbId', tmdbId);
         const r = await cachedApi(`media/collection?${p.toString()}`);
-        // Only set if we actually have collection data
         if (r.collection) {
           setCollection(r.collection);
           setCollectionItems(r.items || []);
@@ -419,7 +369,7 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
             {/* ── User Star Rating ── */}
             <StarRating item={d} />
             <div className="flex flex-wrap items-center gap-3 mb-6">
-              <SmartButton item={d} onPlay={(item, episodeId) => { if (episodeId) setPlayEpId(episodeId); setShowPlayer(true); }} onRequestModal={() => setShowRequestModal(true)} />
+              <SmartButton item={d} onPlay={handlePlay} onRequestModal={() => setShowRequestModal(true)} />
               <TrailerButton item={d} />
               <FavoriteButton item={d} />
             </div>
@@ -484,14 +434,14 @@ export function MediaDetailView({ item, onBack, onPlay, onItemClick }) {
               <div className="grid gap-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-28 skeleton" />)}</div>
             ) : (
               <div className="grid gap-3">
-                {episodes.map(ep => <EpisodeCard key={ep.id} ep={ep} onPlay={(id) => { setPlayEpId(id); setShowPlayer(true); }} />)}
+                {episodes.map(ep => <EpisodeCard key={ep.id} ep={ep} onPlay={(id) => handlePlay(d, id)} />)}
                 {episodes.length === 0 && <div className="text-center py-12 text-gray-600"><p>Aucun épisode disponible</p></div>}
               </div>
             )}
           </div>
         )}
 
-        {/* Collection/Saga - only if we have data */}
+        {/* Collection/Saga */}
         {collection && collectionItems.length > 0 && (
           <div data-testid="saga-section" className="mt-14">
             <h2 className="text-xl font-bold mb-2 flex items-center gap-2"><Layers className="w-5 h-5 text-amber-400" />{collection.name}</h2>

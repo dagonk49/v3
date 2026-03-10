@@ -1,7 +1,6 @@
 /**
  * controllers/media.controller.js
- * Gère la logique des médias, avec protection Anti-Collision TMDB stricte
- * et requêtes Jellyfin optimisées pour éviter les crashs de session.
+ * Gère la logique des médias avec détection intelligente du lecteur (Web vs Desktop)
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -350,8 +349,6 @@ export async function handleMediaDetail(req) {
   let isLocallyAvailable = localTmdbIds && localTmdbIds.has(tmdbStr);
   let localJellyfinId = isLocallyAvailable ? localTmdbIds.get(tmdbStr) : undefined;
 
-  // 🚨 LE CORRECTIF ANTI-COLLISION EST ICI 🚨
-  // Si on pense l'avoir en local, on vérifie que Jellyfin a bien le MÊME type de média (Film vs Série)
   if (localJellyfinId) {
     try {
       const checkTypeRes = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${localJellyfinId}?Fields=Type`, { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(5000) });
@@ -359,7 +356,6 @@ export async function handleMediaDetail(req) {
         const checkData = await checkTypeRes.json();
         const localIsTv = checkData.Type === 'Series';
         if (localIsTv !== isTv) {
-          // Collision détectée ! L'ID TMDB pointe vers un fichier du mauvais type.
           isLocallyAvailable = false;
           localJellyfinId = undefined;
         }
@@ -667,7 +663,7 @@ export async function handleMediaProgress(req) {
 }
 
 /**
- * LECTEUR STREAMING (Fix du plantage de session)
+ * LECTEUR STREAMING (Optimisé pour MPV / Desktop)
  */
 export async function handleStream(req) {
   const session = await getSession(req);
@@ -675,7 +671,12 @@ export async function handleStream(req) {
 
   try {
     const config = await getConfig();
-    let itemId = parseId(new URL(req.url).searchParams.get('id')).cleanId;
+    const url = new URL(req.url);
+    let itemId = parseId(url.searchParams.get('id')).cleanId;
+    
+    // Détection du lecteur desktop
+    const isDesktop = url.searchParams.get('desktop') === 'true';
+
     if (!itemId) return jsonResponse({ error: 'ID requis' }, 400);
 
     const isLikelyTmdbId = /^\d+$/.test(itemId);
@@ -687,41 +688,37 @@ export async function handleStream(req) {
       } catch (resolveErr) { return jsonResponse({ error: 'Impossible de résoudre l\'ID local', notLocal: true }, 503); }
     }
 
-    // 🚨 CORRECTIF DU PLANTAGE MAGICEN / STREAMING ICI 🚨
-    // Au lieu de créer un faux objet Request qui fait planter le getSession de Next.js,
-    // on interroge Jellyfin directement depuis le serveur !
     try {
       const itemCheck = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${itemId}`, { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(10000) });
       if (itemCheck.ok) {
         const itemData = await itemCheck.json();
         if (itemData.Type === 'Series') {
           let nextEpId = null;
-          
-          // Cherche un épisode en cours
           const res1 = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/Resume?ParentId=${itemId}&Limit=1&Recursive=true&MediaTypes=Video`, { headers: { 'X-Emby-Token': session.jellyfinToken }});
           if (res1.ok) { const d1 = await res1.json(); if(d1.Items?.length) nextEpId = d1.Items[0].Id; }
-          
-          // Cherche le prochain non lu
           if(!nextEpId) {
              const res2 = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?ParentId=${itemId}&IncludeItemTypes=Episode&IsPlayed=false&Recursive=true&SortBy=ParentIndexNumber,IndexNumber&SortOrder=Ascending&Limit=1`, { headers: { 'X-Emby-Token': session.jellyfinToken }});
              if (res2.ok) { const d2 = await res2.json(); if(d2.Items?.length) nextEpId = d2.Items[0].Id; }
           }
-          
-          // Fallback S01E01
           if(!nextEpId) {
              const res3 = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?ParentId=${itemId}&IncludeItemTypes=Episode&Recursive=true&SortBy=ParentIndexNumber,IndexNumber&SortOrder=Ascending&Limit=1`, { headers: { 'X-Emby-Token': session.jellyfinToken }});
              if (res3.ok) { const d3 = await res3.json(); if(d3.Items?.length) nextEpId = d3.Items[0].Id; }
           }
-
           if (nextEpId) itemId = nextEpId;
-          else return jsonResponse({ error: 'Aucun épisode disponible' }, 404);
         }
       }
     } catch (checkErr) {}
 
     const res = await fetch(`${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Emby-Token': session.jellyfinToken },
-      body: JSON.stringify({ DeviceProfile: { MaxStreamingBitrate: 120000000, DirectPlayProfiles: [{ Container: 'mp4,m4v,webm,mov', Type: 'Video' }], TranscodingProfiles: [{ Container: 'ts', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus', Context: 'Streaming', Protocol: 'hls', BreakOnNonKeyFrames: true, EnableSubtitlesInManifest: true }], SubtitleProfiles: [{ Format: 'vtt', Method: 'External' }, { Format: 'srt', Method: 'External' }, { Format: 'ass', Method: 'External' }, { Format: 'ssa', Method: 'External' }] } }),
+      body: JSON.stringify({ 
+        DeviceProfile: { 
+          MaxStreamingBitrate: 140000000, 
+          DirectPlayProfiles: [{ Container: 'mp4,m4v,webm,mov,mkv,avi', Type: 'Video' }], 
+          TranscodingProfiles: [{ Container: 'ts', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus', Context: 'Streaming', Protocol: 'hls', BreakOnNonKeyFrames: true, EnableSubtitlesInManifest: true }], 
+          SubtitleProfiles: [{ Format: 'vtt', Method: 'External' }, { Format: 'srt', Method: 'External' }, { Format: 'ass', Method: 'External' }, { Format: 'ssa', Method: 'External' }] 
+        } 
+      }),
       signal: AbortSignal.timeout(30000),
     });
 
@@ -731,17 +728,19 @@ export async function handleStream(req) {
     const playSessionId = pb.PlaySessionId || uuidv4();
     const streams = mediaSource?.MediaStreams || [];
 
+    const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
+    
     const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
     const hlsParams = new URLSearchParams({ api_key: session.jellyfinToken, MediaSourceId: mediaSource?.Id || '', PlaySessionId: playSessionId, VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus', SegmentContainer: 'ts', EnableAdaptiveBitrateStreaming: 'true', SubtitleMethod: 'Hls', EnableAudioTracksInManifest: 'true' });
     if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
-    
-    const streamUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
-    const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
+    const hlsUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+
+    const streamUrl = isDesktop ? directUrl : hlsUrl;
 
     const subtitles = streams.filter(s => s.Type === 'Subtitle').map((s, index) => ({ index: s.Index, language: s.Language || 'und', displayTitle: s.DisplayTitle || s.Title || s.Language || `Sous-titre ${index + 1}`, codec: s.Codec, url: s.DeliveryUrl ? `${config.jellyfinUrl}${s.DeliveryUrl}` : `${config.jellyfinUrl}/Videos/${itemId}/${mediaSource?.Id || ''}/Subtitles/${s.Index}/Stream.${s.Codec || 'srt'}?api_key=${session.jellyfinToken}` }));
     const audioTracks = streams.filter(s => s.Type === 'Audio').map((s, index) => ({ index: s.Index, language: s.Language || 'und', displayTitle: s.DisplayTitle || s.Title || s.Language || `Audio ${index + 1}`, codec: s.Codec, channels: s.Channels || 2, isDefault: !!s.IsDefault }));
 
-    return jsonResponse({ streamUrl, fallbackStreamUrl: directUrl, subtitles, audioTracks, duration: mediaSource?.RunTimeTicks ? mediaSource.RunTimeTicks / 10000000 : 0, playSessionId, mediaSourceId: mediaSource?.Id || itemId });
+    return jsonResponse({ streamUrl, fallbackStreamUrl: directUrl, subtitles, audioTracks, duration: mediaSource?.RunTimeTicks ? mediaSource.RunTimeTicks / 10000000 : 0, playSessionId, mediaSourceId: mediaSource?.Id || itemId, isDesktop });
   } catch (err) { return jsonResponse({ error: 'Stream unavailable' }, 404); }
 }
 

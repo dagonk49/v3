@@ -133,11 +133,16 @@ export function VideoPlayer({ item, episodeId, onClose }) {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: true,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120, // Plus de buffer pour éviter les micro-coupures
-        startLevel: -1, 
-        capLevelToPlayerSize: true, // Optimise la qualité selon la taille de l'écran
+      enableWorker: true,
+      lowLatencyMode: false, // Désactiver pour laisser le temps au transcodage
+      maxBufferLength: 30,
+      backBufferLength: 15,
+      manifestLoadingTimeOut: 20000, // Plus de temps pour le premier segment transcodé
+      manifestLoadingMaxRetry: 5,
+      levelLoadingTimeOut: 20000,
+      fragLoadingTimeOut: 20000,
+      startLevel: -1,
+      capLevelToPlayerSize: true,
       });
       hlsRef.current = hls;
 

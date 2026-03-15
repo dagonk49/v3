@@ -1148,41 +1148,36 @@ export async function handleStream(req) {
     }
 
     // Appel PlaybackInfo (OPTIMISÉ SANS MKV EN DIRECT PLAY)
-    const res = await fetch(
-      `${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Emby-Token': session.jellyfinToken,
-        },
-        body: JSON.stringify({
-          DeviceProfile: {
-            MaxStreamingBitrate: 120000000,
-            DirectPlayProfiles: [{ Container: 'mp4,m4v,webm,mov', Type: 'Video' }],
-            TranscodingProfiles: [
-              {
-                Container: 'ts',
-                Type: 'Video',
-                VideoCodec: 'h264,hevc,av1,vp9',
-                AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
-                Context: 'Streaming',
-                Protocol: 'hls',
-                BreakOnNonKeyFrames: true,
-                EnableSubtitlesInManifest: true,
-              },
-            ],
-            SubtitleProfiles: [
-              { Format: 'vtt', Method: 'External' },
-              { Format: 'srt', Method: 'External' },
-              { Format: 'ass', Method: 'External' },
-              { Format: 'ssa', Method: 'External' },
-            ],
-          },
-        }),
-        signal: AbortSignal.timeout(30000),
-      }
-    );
+    const res = await fetch(`${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`, {
+  method: 'POST', 
+  headers: { 
+    'Content-Type': 'application/json', 
+    'X-Emby-Token': session.jellyfinToken 
+  },
+  body: JSON.stringify({ 
+    DeviceProfile: { 
+      // Augmentez le bitrate max pour ne pas brider le transcodeur
+      MaxStreamingBitrate: 140000000, 
+      DirectPlayProfiles: [
+        { Container: 'mp4,m4v,webm,mov,mkv,avi', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus' }
+      ], 
+      TranscodingProfiles: [{ 
+        Container: 'ts', 
+        Type: 'Video', 
+        // Privilégiez le H264 pour une stabilité maximale si le serveur peine en HEVC
+        VideoCodec: 'h264,hevc', 
+        AudioCodec: 'aac,mp3', 
+        Context: 'Streaming', 
+        Protocol: 'hls', 
+        BreakOnNonKeyFrames: true, 
+        EnableSubtitlesInManifest: true 
+      }], 
+      // Ajoutez des conditions de réponse pour forcer la qualité
+      ResponseProfiles: [{ Container: 'm4v', Type: 'Video', MimeType: 'video/mp4' }]
+    } 
+  }),
+  signal: AbortSignal.timeout(30000),
+});
 
     if (!res.ok) return jsonResponse({ error: 'Playback info failed' }, 404);
     const pb = await res.json();
@@ -1194,17 +1189,20 @@ export async function handleStream(req) {
     const audioStreamIndexes = streams.filter(s => s.Type === 'Audio').map(s => s.Index).join(',');
     const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
     
-    const hlsParams = new URLSearchParams({
-      api_key: session.jellyfinToken,
-      MediaSourceId: mediaSource?.Id || '',
-      PlaySessionId: playSessionId,
-      VideoCodec: 'h264,hevc,av1,vp9',
-      AudioCodec: 'aac,mp3,ac3,eac3,flac,opus',
-      SegmentContainer: 'ts',
-      EnableAdaptiveBitrateStreaming: 'true',
-      SubtitleMethod: 'Hls',
-      EnableAudioTracksInManifest: 'true',
-    });
+   const hlsParams = new URLSearchParams({ 
+    api_key: session.jellyfinToken, 
+    MediaSourceId: mediaSource?.Id || '', 
+    PlaySessionId: playSessionId, 
+    // Forcez le transcodeur à utiliser un bitrate élevé (ex: 20Mbps pour de la HD/4K)
+    VideoBitrate: '20000000', 
+    MaxVideoBitrate: '20000000',
+    VideoCodec: 'h264', // Forcer H264 améliore souvent la compatibilité du transcodage direct
+    AudioCodec: 'aac',
+    SegmentContainer: 'ts', 
+    EnableAdaptiveBitrateStreaming: 'true', 
+    SubtitleMethod: 'Hls', 
+    EnableAudioTracksInManifest: 'true' 
+});
     
     // ON NE LIMITE PLUS L'AUDIOSTREAMINDEX ICI POUR PERMETTRE LE CHANGEMENT DE LANGUE
     if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);

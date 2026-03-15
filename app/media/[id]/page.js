@@ -22,9 +22,18 @@ export default function MediaDetailPage() {
       router.push(`/search?genre=${encodeURIComponent(itemToClick.__searchGenre)}`);
       return;
     }
-    const id = itemToClick.id || itemToClick.tmdbId;
-    if (id) setItemCache(id, itemToClick);
-    router.push(`/media/${id}`);
+
+    let rawId = String(itemToClick.id || itemToClick.tmdbId);
+    
+    // LE CORRECTIF FRONTEND EST ICI : On ajoute 'tv' ou 'movie' dans l'URL
+    if (/^\d+$/.test(rawId) || rawId.startsWith('tmdb-')) {
+        const cleanId = rawId.replace(/^tmdb-(tv-|movie-)?/, '');
+        const isTv = itemToClick.mediaType === 'tv' || itemToClick.type === 'Series';
+        rawId = `tmdb-${isTv ? 'tv' : 'movie'}-${cleanId}`;
+    }
+    
+    if (rawId) setItemCache(rawId, itemToClick);
+    router.push(`/media/${rawId}`);
   };
 
   return (

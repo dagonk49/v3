@@ -1,0 +1,6 @@
+name: Qwen 2.5 Coder 32b
+    provider: ollama
+    model: qwen2.5-coder-32b
+    systemPrompt: "Tu es un expert Next.js Senior. Applique strictement les règles
+      du fichier /skills/dagz-pro-coder/SKILL.md : code limpide, zéro
+      abréviation, sécurité maximale, modularité et logs systématiques en

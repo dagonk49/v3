@@ -14,6 +14,8 @@ import {
 } from '@/lib/media-mappers';
 import { applyParentalFilter } from '@/lib/dagzrank';
 
+
+
 // ============================================================================
 // UTILITAIRE : DÉCODEUR D'ID (Anti-Collision TMDB Frontend)
 // ============================================================================
@@ -29,8 +31,12 @@ function parseId(id) {
   return { cleanId: strId, forcedType: null };
 }
 
+
+
 // ============================================================================
 // ROUTE : BIBLIOTHÈQUE GLOBALE (Jellyfin)
+
+
 // ============================================================================
 export async function handleMediaLibrary(req) {
   const session = await getSession(req);
@@ -84,8 +90,12 @@ export async function handleMediaLibrary(req) {
   }
 }
 
+
+
 // ============================================================================
 // ROUTE : GENRES JELLYFIN
+
+
 // ============================================================================
 export async function handleMediaGenres(req) {
   const session = await getSession(req);
@@ -105,15 +115,16 @@ export async function handleMediaGenres(req) {
   }
 }
 
-<<<<<<< HEAD
 /**
  * GET /api/person/detail?id={personId}
  */
-=======
+
+
 // ============================================================================
 // ROUTE : DÉTAIL D'UN ACTEUR
+
+
 // ============================================================================
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
 export async function handlePersonDetail(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -125,10 +136,7 @@ export async function handlePersonDetail(req) {
   const personId = parseId(rawId).cleanId;
   const isNumericId = /^\d+$/.test(personId);
 
-<<<<<<< HEAD
   // ── 1. AGGRÉGATEUR SEERR (Résiste aux changements de l'API) ──
-=======
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
   const fetchSeerrPerson = async (id) => {
     let mergedData = {};
     if (!config.jellyseerrUrl) return mergedData;
@@ -142,27 +150,18 @@ export async function handlePersonDetail(req) {
         `${config.jellyseerrUrl}/api/v1/person/${id}/tv_credits?language=fr`
       ];
 
-<<<<<<< HEAD
       const results = await Promise.allSettled(
         urls.map(u => fetch(u, { headers, signal: AbortSignal.timeout(15000) }).then(r => r.ok ? r.json() : {}))
       );
 
       for (const [index, res] of results.entries()) {
         if (res.status === 'fulfilled' && res.value) {
-          if (index === 0) mergedData = { ...mergedData, ...res.value }; // Infos de base de l'acteur
-=======
-      const results = await Promise.allSettled(urls.map(u => fetch(u, { headers, signal: AbortSignal.timeout(15000) }).then(r => r.ok ? r.json() : {})));
-
-      for (const [index, res] of results.entries()) {
-        if (res.status === 'fulfilled' && res.value) {
           if (index === 0) mergedData = { ...mergedData, ...res.value };
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
           if (index === 1 && res.value.cast) mergedData.combinedCredits = res.value; 
           if (index === 2 && res.value.cast) mergedData.movieCredits = res.value;
           if (index === 3 && res.value.cast) mergedData.tvCredits = res.value;
         }
       }
-<<<<<<< HEAD
     } catch (e) {
       console.error('[DagzFlix] Erreur de communication avec Seerr:', e.message);
     }
@@ -170,12 +169,6 @@ export async function handlePersonDetail(req) {
   };
 
   // ── 2. EXTRACTEUR UNIVERSEL DE CREDITS ──
-=======
-    } catch (e) { }
-    return mergedData;
-  };
-
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
   const extractCredits = (data) => {
     const remoteItems = [];
     const seen = new Set();
@@ -189,15 +182,10 @@ export async function handlePersonDetail(req) {
         
         if (seen.has(key)) continue;
         seen.add(key);
-<<<<<<< HEAD
-        
         remoteItems.push({
           ...mapTmdbItem(credit, isTv),
           role: credit.character || credit.job || '',
         });
-=======
-        remoteItems.push({ ...mapTmdbItem(credit, isTv), role: credit.character || credit.job || '' });
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
       }
     };
 
@@ -205,7 +193,6 @@ export async function handlePersonDetail(req) {
       processList(data.combinedCredits.cast, null);
       processList(data.combinedCredits.crew, null);
     } else {
-<<<<<<< HEAD
       if (data.movieCredits) {
         processList(data.movieCredits.cast, false);
         processList(data.movieCredits.crew, false);
@@ -218,11 +205,6 @@ export async function handlePersonDetail(req) {
         processList(data.credits.cast, null);
         processList(data.credits.crew, null);
       }
-=======
-      if (data.movieCredits) { processList(data.movieCredits.cast, false); processList(data.movieCredits.crew, false); }
-      if (data.tvCredits) { processList(data.tvCredits.cast, true); processList(data.tvCredits.crew, true); }
-      if (data.credits) { processList(data.credits.cast, null); processList(data.credits.crew, null); }
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     }
     return remoteItems;
   };
@@ -233,7 +215,6 @@ export async function handlePersonDetail(req) {
 
     const seerrData = await fetchSeerrPerson(personId);
     let personInfo = {
-<<<<<<< HEAD
       id: personId,
       name: seerrData.name || '',
       overview: seerrData.biography || '',
@@ -241,12 +222,6 @@ export async function handlePersonDetail(req) {
       photoUrl: seerrData.profilePath ? `/api/proxy/tmdb?path=${seerrData.profilePath}&width=w400` : '',
       tmdbId: personId,
     };
-=======
-      id: personId, name: seerrData.name || '', overview: seerrData.biography || '',
-      birthDate: seerrData.birthday || '', photoUrl: seerrData.profilePath ? `/api/proxy/tmdb?path=${seerrData.profilePath}&width=w400` : '', tmdbId: personId,
-    };
-    
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     let remoteItems = extractCredits(seerrData);
 
     if (remoteItems.length > 0) {
@@ -264,10 +239,7 @@ export async function handlePersonDetail(req) {
     return jsonResponse({ person: personInfo, items: remoteItems });
   }
 
-<<<<<<< HEAD
   // ── CHEMIN 2 : ID UUID (Venant de Jellyfin) ──
-=======
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
   let person = null;
   try {
     const personRes = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items/${personId}?Fields=ProviderIds,Overview,PremiereDate`, { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(30000) });
@@ -310,10 +282,7 @@ export async function handlePersonDetail(req) {
 
   if (tmdbPersonId && config.jellyseerrUrl) {
     const seerrData = await fetchSeerrPerson(tmdbPersonId);
-<<<<<<< HEAD
     
-=======
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     personInfo.name = seerrData.name || personInfo.name;
     personInfo.overview = seerrData.biography || personInfo.overview;
     personInfo.birthDate = seerrData.birthday || personInfo.birthDate;
@@ -327,15 +296,11 @@ export async function handlePersonDetail(req) {
       if (tmdbStr && localItemsMap.has(tmdbStr)) continue;
       
       const isLocal = tmdbStr && localTmdbIds.has(tmdbStr);
-<<<<<<< HEAD
       allItems.push({
         ...remoteItem,
         mediaStatus: isLocal ? 5 : (remoteItem.mediaStatus || 0),
         localId: isLocal ? localTmdbIds.get(tmdbStr) : undefined,
       });
-=======
-      allItems.push({ ...remoteItem, mediaStatus: isLocal ? 5 : (remoteItem.mediaStatus || 0), localId: isLocal ? localTmdbIds.get(tmdbStr) : undefined });
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     }
   }
 
@@ -343,9 +308,13 @@ export async function handlePersonDetail(req) {
   return jsonResponse({ person: personInfo, items: allItems });
 }
 
-// ============================================================================
+
+
+// =====================================================================
 // ROUTE : DÉTAIL D'UN FILM OU SÉRIE (Avec Anti-Collision Interne)
-// ============================================================================
+
+
+// =====================================================================
 export async function handleMediaDetail(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -376,15 +345,10 @@ export async function handleMediaDetail(req) {
         
         if (credRes.ok) {
           const credData = await credRes.json();
-<<<<<<< HEAD
-          // Correction de l'extraction de casting pour éviter les erreurs Seerr
-=======
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
           const rawCredits = credData.credits || credData.mediaInfo?.credits || {};
           const castListRaw = rawCredits.cast || credData.cast || [];
           const crewListRaw = rawCredits.crew || credData.crew || [];
 
-<<<<<<< HEAD
           const castList = castListRaw.slice(0, 15).map(actor => ({
             Id: null,
             tmdbId: actor.id,
@@ -409,12 +373,6 @@ export async function handleMediaDetail(req) {
           if (castList.length > 0 || crewList.length > 0) {
             people = [...castList, ...crewList];
           }
-=======
-          const castList = castListRaw.slice(0, 15).map(actor => ({ Id: null, tmdbId: actor.id, name: actor.name || '', role: actor.character || '', type: 'Actor', photoUrl: actor.profilePath ? `/api/proxy/tmdb?path=${actor.profilePath}&width=w200` : null }));
-          const crewList = (Array.isArray(crewListRaw) ? crewListRaw : []).filter(c => c.job === 'Director' || c.department === 'Writing').slice(0, 6).map(c => ({ Id: null, tmdbId: c.id, name: c.name || '', role: c.job || '', type: c.job === 'Director' ? 'Director' : 'Writer', photoUrl: c.profilePath ? `/api/proxy/tmdb?path=${c.profilePath}&width=w200` : null }));
-            
-          if (castList.length > 0 || crewList.length > 0) people = [...castList, ...crewList];
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
         }
       } catch (_) { }
     }
@@ -454,12 +412,10 @@ export async function handleMediaDetail(req) {
     } catch (_) { }
   }
 
-<<<<<<< HEAD
   if (!tmdbData) {
     return jsonResponse({ error: 'Media introuvable' }, 404);
   }
 
-  // Correction casting pour Seerr Fallback
   const rawCredits = tmdbData.credits || tmdbData.mediaInfo?.credits || {};
   const castListRaw = rawCredits.cast || tmdbData.cast || [];
   const crewListRaw = rawCredits.crew || tmdbData.crew || [];
@@ -486,10 +442,6 @@ export async function handleMediaDetail(req) {
     }));
 
   const genres = resolveGenres(tmdbData);
-=======
-  if (!tmdbData) return jsonResponse({ error: 'Media introuvable' }, 404);
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
-
   const tmdbStr = String(tmdbData.id);
   let isLocallyAvailable = localTmdbIds && localTmdbIds.has(tmdbStr);
   let localJellyfinId = isLocallyAvailable ? localTmdbIds.get(tmdbStr) : undefined;
@@ -508,20 +460,11 @@ export async function handleMediaDetail(req) {
     } catch(e) {}
   }
 
-  const rawCredits = tmdbData.credits || tmdbData.mediaInfo?.credits || {};
-  const castListRaw = rawCredits.cast || tmdbData.cast || [];
-  const crewListRaw = rawCredits.crew || tmdbData.crew || [];
-
-  const castList = castListRaw.slice(0, 15).map(actor => ({ Id: null, tmdbId: actor.id, name: actor.name || '', role: actor.character || '', type: 'Actor', photoUrl: actor.profilePath ? `/api/proxy/tmdb?path=${actor.profilePath}&width=w200` : null }));
-  const crewList = (Array.isArray(crewListRaw) ? crewListRaw : []).filter(c => c.job === 'Director' || c.department === 'Writing').slice(0, 6).map(c => ({ Id: null, tmdbId: c.id, name: c.name || '', role: c.job || '', type: c.job === 'Director' ? 'Director' : 'Writer', photoUrl: c.profilePath ? `/api/proxy/tmdb?path=${c.profilePath}&width=w200` : null }));
-
-  const genres = resolveGenres(tmdbData);
   const db = await getDb();
   const favDoc = await db.collection('favorites').findOne({ userId: session.userId, itemId: tmdbStr });
 
   return jsonResponse({
     item: {
-<<<<<<< HEAD
       id: localJellyfinId || tmdbData.id,
       tmdbId: tmdbData.id,
       name: tmdbData.title || tmdbData.name || '',
@@ -557,22 +500,17 @@ export async function handleMediaDetail(req) {
         numberOfSeasons: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0,
         seasonCount: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0,
       }),
-=======
-      id: localJellyfinId || tmdbData.id, tmdbId: tmdbData.id, name: tmdbData.title || tmdbData.name || '', originalTitle: tmdbData.originalTitle || tmdbData.originalName || '',
-      type: isTv ? 'Series' : 'Movie', mediaType: isTv ? 'tv' : 'movie', overview: tmdbData.overview || '', genres, communityRating: tmdbData.voteAverage || 0, premiereDate: tmdbData.releaseDate || tmdbData.firstAirDate || '',
-      year: (tmdbData.releaseDate || tmdbData.firstAirDate || '').substring(0, 4), runtime: tmdbData.runtime || (tmdbData.episodeRunTime?.[0]) || 0,
-      posterUrl: tmdbData.posterPath ? `/api/proxy/tmdb?path=${tmdbData.posterPath}&width=w500` : '', backdropUrl: tmdbData.backdropPath ? `/api/proxy/tmdb?path=${tmdbData.backdropPath}&width=w1280` : '',
-      people: [...castList, ...crewList], providerIds: { Tmdb: tmdbStr }, studios: (tmdbData.productionCompanies || []).map(c => c.name).filter(Boolean), taglines: tmdbData.tagline ? [tmdbData.tagline] : [],
-      isPlayed: false, playbackPositionTicks: 0, mediaSources: [], hasSubtitles: false, externalUrls: [], mediaStatus: isLocallyAvailable ? 5 : Math.min(tmdbData.mediaInfo?.status || 0, 4),
-      localId: localJellyfinId, isFavorite: !!favDoc, ...(isTv && { numberOfSeasons: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0, seasonCount: tmdbData.numberOfSeasons || tmdbData.number_of_seasons || 0 }),
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     },
   });
 }
 
-// ============================================================================
+
+
+// =====================================================================
 // ROUTES SÉRIES (NextEpisode, Resume, Saisons...)
-// ============================================================================
+
+
+// =====================================================================
 export async function handleNextEpisode(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -652,9 +590,13 @@ export async function handleMediaEpisodes(req) {
   return jsonResponse({ episodes });
 }
 
-// ============================================================================
+
+
+// =====================================================================
 // ROUTES ANNEXES (Trailers, Collections, Statuts)
-// ============================================================================
+
+
+// =====================================================================
 export async function handleMediaTrailer(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -790,9 +732,13 @@ export async function handleMediaStatus(req) {
   return jsonResponse({ status, jellyfinAvailable, jellyseerrStatus, localId: resolvedLocalId });
 }
 
-// ============================================================================
+
+
+// =====================================================================
 // ROUTES ACTIONS (Requêtes, Progression, Lecteur)
-// ============================================================================
+
+
+// =====================================================================
 export async function handleMediaRequest(req) {
   const session = await getSession(req);
   if (!session) return jsonResponse({ error: 'Non authentifie' }, 401);
@@ -854,16 +800,12 @@ export async function handleStream(req) {
 
   try {
     const config = await getConfig();
-<<<<<<< HEAD
-    let itemId = new URL(req.url).searchParams.get('id');
-=======
     const url = new URL(req.url);
     let itemId = parseId(url.searchParams.get('id')).cleanId;
     
     // Détection du lecteur desktop
     const isDesktop = url.searchParams.get('desktop') === 'true';
 
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
     if (!itemId) return jsonResponse({ error: 'ID requis' }, 400);
 
     const isLikelyTmdbId = /^\d+$/.test(itemId);
@@ -896,52 +838,34 @@ export async function handleStream(req) {
       }
     } catch (checkErr) {}
 
-<<<<<<< HEAD
-    // Appel PlaybackInfo (OPTIMISÉ SANS MKV EN DIRECT PLAY)
+    // Appel PlaybackInfo
     const res = await fetch(`${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`, {
-  method: 'POST', 
-  headers: { 
-    'Content-Type': 'application/json', 
-    'X-Emby-Token': session.jellyfinToken 
-  },
-  body: JSON.stringify({ 
-    DeviceProfile: { 
-      // Augmentez le bitrate max pour ne pas brider le transcodeur
-      MaxStreamingBitrate: 140000000, 
-      DirectPlayProfiles: [
-        { Container: 'mp4,m4v,webm,mov,mkv,avi', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus' }
-      ], 
-      TranscodingProfiles: [{ 
-        Container: 'ts', 
-        Type: 'Video', 
-        // Privilégiez le H264 pour une stabilité maximale si le serveur peine en HEVC
-        VideoCodec: 'h264,hevc', 
-        AudioCodec: 'aac,mp3', 
-        Context: 'Streaming', 
-        Protocol: 'hls', 
-        BreakOnNonKeyFrames: true, 
-        EnableSubtitlesInManifest: true 
-      }], 
-      // Ajoutez des conditions de réponse pour forcer la qualité
-      ResponseProfiles: [{ Container: 'm4v', Type: 'Video', MimeType: 'video/mp4' }]
-    } 
-  }),
-  signal: AbortSignal.timeout(30000),
-});
-=======
-    const res = await fetch(`${config.jellyfinUrl}/Items/${itemId}/PlaybackInfo?UserId=${session.jellyfinUserId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Emby-Token': session.jellyfinToken },
+      method: 'POST', 
+      headers: { 
+        'Content-Type': 'application/json', 
+        'X-Emby-Token': session.jellyfinToken 
+      },
       body: JSON.stringify({ 
         DeviceProfile: { 
           MaxStreamingBitrate: 140000000, 
-          DirectPlayProfiles: [{ Container: 'mp4,m4v,webm,mov,mkv,avi', Type: 'Video' }], 
-          TranscodingProfiles: [{ Container: 'ts', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus', Context: 'Streaming', Protocol: 'hls', BreakOnNonKeyFrames: true, EnableSubtitlesInManifest: true }], 
+          DirectPlayProfiles: [
+            { Container: 'mp4,m4v,webm,mov,mkv,avi', Type: 'Video', VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus' }
+          ], 
+          TranscodingProfiles: [{ 
+            Container: 'ts', 
+            Type: 'Video', 
+            VideoCodec: 'h264,hevc', 
+            AudioCodec: 'aac,mp3', 
+            Context: 'Streaming', 
+            Protocol: 'hls', 
+            BreakOnNonKeyFrames: true, 
+            EnableSubtitlesInManifest: true 
+          }], 
           SubtitleProfiles: [{ Format: 'vtt', Method: 'External' }, { Format: 'srt', Method: 'External' }, { Format: 'ass', Method: 'External' }, { Format: 'ssa', Method: 'External' }] 
         } 
       }),
       signal: AbortSignal.timeout(30000),
     });
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
 
     if (!res.ok) return jsonResponse({ error: 'Playback info failed' }, 404);
     const pb = await res.json();
@@ -949,40 +873,50 @@ export async function handleStream(req) {
     const playSessionId = pb.PlaySessionId || uuidv4();
     const streams = mediaSource?.MediaStreams || [];
 
-<<<<<<< HEAD
     // Support multi-audio et sous-titres
     const audioStreamIndexes = streams.filter(s => s.Type === 'Audio').map(s => s.Index).join(',');
     const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
+    const defaultAudio = streams.find(s => s.Type === 'Audio' && s.IsDefault) || streams.find(s => s.Type === 'Audio');
     
-   const hlsParams = new URLSearchParams({ 
-    api_key: session.jellyfinToken, 
-    MediaSourceId: mediaSource?.Id || '', 
-    PlaySessionId: playSessionId, 
-    // Forcez le transcodeur à utiliser un bitrate élevé (ex: 20Mbps pour de la HD/4K)
-    VideoBitrate: '20000000', 
-    MaxVideoBitrate: '20000000',
-    VideoCodec: 'h264', // Forcer H264 améliore souvent la compatibilité du transcodage direct
-    AudioCodec: 'aac',
-    SegmentContainer: 'ts', 
-    EnableAdaptiveBitrateStreaming: 'true', 
-    SubtitleMethod: 'Hls', 
-    EnableAudioTracksInManifest: 'true' 
-});
-    
-    // ON NE LIMITE PLUS L'AUDIOSTREAMINDEX ICI POUR PERMETTRE LE CHANGEMENT DE LANGUE
-    if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
-    
-    const streamUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
-=======
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
-    const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
-    
-    const subtitleStreamIndexes = streams.filter(s => s.Type === 'Subtitle').map(s => s.Index).join(',');
-    const hlsParams = new URLSearchParams({ api_key: session.jellyfinToken, MediaSourceId: mediaSource?.Id || '', PlaySessionId: playSessionId, VideoCodec: 'h264,hevc,av1,vp9', AudioCodec: 'aac,mp3,ac3,eac3,flac,opus', SegmentContainer: 'ts', EnableAdaptiveBitrateStreaming: 'true', SubtitleMethod: 'Hls', EnableAudioTracksInManifest: 'true' });
-    if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
-    const hlsUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+    const hlsParams = new URLSearchParams({
+      DeviceId: 'TW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE0My4wLjAuMCBTYWZhcmkvNTM3LjM2IE9QUi8xMjcuMC4wLjB8MTc3MjE1Mzk5MTEwNA11',
+      MediaSourceId: mediaSource?.Id || '',
+      VideoCodec: 'h264',
+      AudioCodec: 'aac,mp3',
+      VideoBitrate: '140000000',
+      AudioBitrate: '384000',
+      MaxFramerate: '24',
+      SegmentContainer: 'ts',
+      MinSegments: '1',
+      BreakOnNonKeyFrames: 'False',
+      PlaySessionId: playSessionId,
+      ApiKey: session.jellyfinToken,
+      TranscodingMaxAudioChannels: '2',
+      RequireAvc: 'false',
+      EnableAudioVbrEncoding: 'true',
+      Tag: mediaSource?.ETag || '',
+      SubtitleMethod: 'Encode',
+      'hevc-level': '150',
+      'hevc-videobitdepth': '10',
+      'hevc-profile': 'main10',
+      'h264-profile': 'high,main,baseline,constrainedbaseline,high10',
+      'h264-rangetype': 'SDR',
+      'h264-level': '52',
+      'h264-deinterlace': 'true',
+      TranscodeReasons: 'AudioCodecNotSupported,VideoRangeTypeNotSupported'
+    });
 
-    const streamUrl = isDesktop ? directUrl : hlsUrl;
+    if (subtitleStreamIndexes) hlsParams.set('SubtitleStreamIndex', subtitleStreamIndexes.split(',')[0]);
+    if (defaultAudio && defaultAudio.Index !== undefined) {
+      hlsParams.set('AudioStreamIndex', defaultAudio.Index.toString());
+    } else if (audioStreamIndexes) {
+      hlsParams.set('AudioStreamIndex', audioStreamIndexes.split(',')[0]);
+    }
+
+    const hlsUrl = `${config.jellyfinUrl}/Videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+    const directUrl = `${config.jellyfinUrl}/Videos/${itemId}/stream?Static=true&MediaSourceId=${mediaSource?.Id || ''}&PlaySessionId=${playSessionId}&api_key=${session.jellyfinToken}`;
+
+    const streamUrl = hlsUrl; // Always use HLS to allow server transcoding for unsupported codecs
 
     const subtitles = streams.filter(s => s.Type === 'Subtitle').map((s, index) => ({ index: s.Index, language: s.Language || 'und', displayTitle: s.DisplayTitle || s.Title || s.Language || `Sous-titre ${index + 1}`, codec: s.Codec, url: s.DeliveryUrl ? `${config.jellyfinUrl}${s.DeliveryUrl}` : `${config.jellyfinUrl}/Videos/${itemId}/${mediaSource?.Id || ''}/Subtitles/${s.Index}/Stream.${s.Codec || 'srt'}?api_key=${session.jellyfinToken}` }));
     const audioTracks = streams.filter(s => s.Type === 'Audio').map((s, index) => ({ index: s.Index, language: s.Language || 'und', displayTitle: s.DisplayTitle || s.Title || s.Language || `Audio ${index + 1}`, codec: s.Codec, channels: s.Channels || 2, isDefault: !!s.IsDefault }));
@@ -991,9 +925,13 @@ export async function handleStream(req) {
   } catch (err) { return jsonResponse({ error: 'Stream unavailable' }, 404); }
 }
 
-// ============================================================================
+
+
+// =====================================================================
 // ROUTES PROXY (Contournement des blocages CORS d'images)
-// ============================================================================
+
+
+// =====================================================================
 export async function handleProxyImage(req) {
   const config = await getConfig();
   if (!config?.jellyfinUrl) return new Response('Not configured', { status: 503 });

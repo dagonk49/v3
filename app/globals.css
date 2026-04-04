@@ -186,3 +186,13 @@ body {
 .card-reflection:hover::after {
   opacity: 1;
 }
+
+/* Subtitles Styling - Transparent background with readable text shadow */
+::cue {
+  background: transparent !important;
+  background-color: transparent !important;
+  text-shadow: 2px 2px 4px #000, -2px -2px 4px #000, 2px -2px 4px #000, -2px 2px 4px #000, 0px 4px 10px rgba(0,0,0,0.8);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  font-weight: 600;
+  color: #ffffff;
+}

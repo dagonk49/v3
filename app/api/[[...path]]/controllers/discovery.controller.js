@@ -28,77 +28,20 @@ export async function handleSearch(req) {
 
     if (!query.trim()) return jsonResponse({ results: [] });
 
-<<<<<<< HEAD
-  // Load user preferences + watch history for DagzRank scoring
-  const db = await getDb();
-  const prefs = await db.collection('preferences').findOne({ userId: session.userId }).catch(() => null);
-  let watchHistory = [];
-  try {
-    const histRes = await fetch(
-      `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?IsPlayed=true&Recursive=true&Limit=100&Fields=Genres&SortBy=DatePlayed&SortOrder=Descending`,
-      { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(30000) }
-    );
-    if (histRes.ok) {
-      const histData = await histRes.json();
-      watchHistory = (histData.Items || []).map(i => ({ id: i.Id, genres: i.Genres || [] }));
-    }
-  } catch (_) { /* ignore */ }
-
-  // V7.7: charger télémétrie + profil parental + TMDB IDs locaux (chacun protégé)
-  const telemetryData = await loadTelemetryData(session.userId).catch(() => ({ userEvents: [], globalRatings: {} }));
-  const userProfile = await getUserProfile(session.userId).catch(() => null);
-  const localTmdbIds = await getLocalTmdbIds(config, session);
-
-  // V7.7: scoreResults ne doit JAMAIS vider les items reçus
-  function scoreResults(items) {
-    let filtered = items;
-    try { filtered = applyParentalFilter(items, userProfile); } catch (e) { console.error('[handleSearch] parental filter failed:', e.message); }
-    return filtered.map(item => {
-      const tmdbStr = item.tmdbId ? String(item.tmdbId) : null;
-      const isLocal = item.mediaStatus === 5 || (tmdbStr && localTmdbIds.has(tmdbStr));
-      return {
-        ...item,
-        mediaStatus: isLocal ? 5 : (item.mediaStatus || 0),
-        localId: (isLocal && tmdbStr && localTmdbIds.get(tmdbStr)) || item.localId || undefined,
-        dagzRank: calculateDagzRank(item, prefs, watchHistory, telemetryData),
-      };
-    });
-  }
-
- if (config.jellyseerrUrl) {
-    try {
-      const res = await fetch(`${config.jellyseerrUrl}/api/v1/search?query=${encodeURIComponent(query)}&page=${page}`, {
-        headers: { 'X-Api-Key': config.jellyseerrApiKey },
-        signal: AbortSignal.timeout(30000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        let mapped = (data.results || []).map(item => mapTmdbItem(item));
-        
-        // PROTECTION SEERR : On supprime les acteurs des résultats de médias pour ne pas faire crasher l'UI
-        if (mediaType === 'movie') mapped = mapped.filter(i => i.type === 'Movie');
-        else if (mediaType === 'tv') mapped = mapped.filter(i => i.type === 'Series');
-        else mapped = mapped.filter(i => i.type === 'Movie' || i.type === 'Series'); 
-
-        let scored = scoreResults(mapped);
-        scored = await injectFavoriteStatus(scored, session.userId);
-        return jsonResponse({
-          results: scored,
-          totalPages: data.totalPages || 1,
-          totalResults: mapped.length,
-        });
-=======
+    // Load user preferences + watch history for DagzRank scoring
     const db = await getDb();
     const prefs = await db.collection('preferences').findOne({ userId: session.userId }).catch(() => null);
     let watchHistory = [];
     try {
-      const histRes = await fetch(`${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?IsPlayed=true&Recursive=true&Limit=100&Fields=Genres&SortBy=DatePlayed&SortOrder=Descending`, { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(30000) });
+      const histRes = await fetch(
+        `${config.jellyfinUrl}/Users/${session.jellyfinUserId}/Items?IsPlayed=true&Recursive=true&Limit=100&Fields=Genres&SortBy=DatePlayed&SortOrder=Descending`,
+        { headers: { 'X-Emby-Token': session.jellyfinToken }, signal: AbortSignal.timeout(30000) }
+      );
       if (histRes.ok) {
         const histData = await histRes.json();
         watchHistory = (histData.Items || []).map(i => ({ id: i.Id, genres: i.Genres || [] }));
->>>>>>> 0a36fcac61048d95a294a5b4d75ffca409b7542b
       }
-    } catch (_) {}
+    } catch (_) { /* ignore */ }
 
     const telemetryData = await loadTelemetryData(session.userId).catch(() => ({ userEvents: [], globalRatings: {} }));
     const userProfile = await getUserProfile(session.userId).catch(() => null);
